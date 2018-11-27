@@ -80,6 +80,7 @@ struct csc452_disk_block
 
 typedef struct csc452_disk_block csc452_disk_block;
 
+int split_path(const char *path, char *directory, char *filename, char *extension);
 
 /*
  * Called whenever the system wants to know the file attributes, including
@@ -91,72 +92,39 @@ static int csc452_getattr(const char *path, struct stat *stbuf)
 {
 	int res = 0;
 
+	char *directory[MAX_FILENAME + 1];
+	char *file[MAX_FILENAME + 1];
+	char *extension[MAX_EXTENSION + 1];
+
+	int file_type = split_path(path, directory, file, extension);
+
 	if (strcmp(path, "/") == 0) {
 		stbuf->st_mode = S_IFDIR | 0755;
 		stbuf->st_nlink = 2;
 	} 
 	else {
-		int count = 0;
-		int slashIndex = -1;
-		for(int i = 0; i < strlen(path); i++){
-			if(strcmp(path[i], "/") == 0){
-				if(count == 1) {
-					slashIndex = i; 
-				}
-				count += 1;
-			}
-		}
-
-		if(count != 1 && count != 2) {
-			//Else return that path doesn't exist
-			res = -ENOENT;
-			return res;
-		}
-		char * dirName;
-		memcpy(path + 1, dirName, sizeof(char) * slashIndex);
-		dirName[slashIndex - 1] = '\0';
-		int dirFlag = -1;
-
-		// Refactor to a seperate method, function (array, size)
-		dirLength = sizeof(csc452_root_directory.directories) / sizeof(csc452_root_directory.directories[0]);
-		for(int i = 0; i < dirLength; i++) {
-			char * d_name = csc452_root_directory.directories[i].d_name;
-			if(strcmp(d_name,dirName) == 0) {
-				dirFlag = 1;
-				break;
-			}
-		}
-
-		if( dirFlag != -1 && count > 1) {
-			char * fileName;
-			memcpy(path + slashIndex + 1, fileName, sizeof(char) * (strlen(path + slashIndex + 1)));
-			dirName[slashIndex - 1] = '\0';
-			int fileFlag = -1;
-			fileLength = sizeof(csc452_directory_entry.files) / sizeof(csc452_directory_entry.files[0]);
-			for(int i = 0; i < fileLength; i++) {
-				char * fname = csc452_directory_entry.files[i].fname;
-				if(strcmp(fname, fileName) == 0) {
-					fileFlag = 1;
-					break;
-				}
-			}
-			if(fileFlag == -1){
+		if(file_type == 0) {
+			int flag = check_directory(directory);
+			if(flag == 1){
+				stbuf->st_mode = S_IFDIR | 0755;
+				stbuf->st_nlink = 2;
+			} else{
 				res = -ENOENT;
-				return res;
 			}
-
-			stbuf->st_mode = S_IFREG | 0666;
-			stbuf->st_nlink = 2;
-			stbuf->st_size = file size
 		} 
-		else if(dirFlag != -1){
-			stbuf->st_mode = S_IFDIR | 0755;
-			stbuf->st_nlink = 2;
+		else if(file_type == 1){
+			int flag = check_file(directory, file, extension);
+			if(flag != -1){
+				stbuf->st_mode = S_IFREG | 0666;
+				stbuf->st_nlink = 2;
+				stbuf->st_size = flag;
+			} else{
+				res = -ENOENT;
+			}
 		} 
 		else{
 			//Else return that path doesn't exist
 			res = -ENOENT;
-			return res;
 		}
 		//If the path does exist and is a directory:
 		//stbuf->st_mode = S_IFDIR | 0755;
@@ -277,9 +245,40 @@ static int csc452_write(const char *path, const char *buf, size_t size,
  */
 static int csc452_rmdir(const char *path)
 {
-	  (void) path;
+	int res = 0;
+	char *directory[MAX_FILENAME + 1];
+	char *file[MAX_FILENAME + 1];
+	char *extension[MAX_EXTENSION + 1];
 
-	  return 0;
+	int file_type = split_path(path, directory, file, extension);
+
+	if(strcmp(file, "\0") == 0){
+		res = -ENOTDIR;
+		return res;
+	}
+
+	if(check_directory(directory != 1)){
+		res = -ENOENT;
+		return res;
+	}
+
+	csc452_directory_entry *entry;
+	get_directory(entry, directory);
+
+	if(entry.nFiles > 0){
+		res = -ENOTEMPTY;
+	} else{
+		csc452_root_directory *root;
+		open_root(root);
+
+		for(int i = 0; i < root.nDirectories; i++){
+			if(strcmp(directoryName, root.directories[i].dname) == 0){
+				// remove this directory
+			}
+		}
+	}
+
+	return res;
 }
 
 /*
@@ -367,6 +366,96 @@ static struct fuse_operations csc452_oper = {
     .unlink		= csc452_unlink,
     .rmdir		= csc452_rmdir
 };
+
+void open_root(csc452_root_directory *root){
+	FILE *file = fopen(".disk", "r");
+	if(file != NULL){
+		fread(root, sizeof(csc452_root_directory), 1, file);
+		fclose(file);
+	}
+}
+
+void get_directory(csc452_directory_entry directory, char *directoryName){
+	long startBlock = 0;
+	csc452_root_directory *root;
+	open_root(root);
+
+	for(int i = 0; i < root.nDirectories; i++){
+		if(strcmp(directoryName, root.directories[i].dname) == 0){
+			startBlock = root.directories[i].nStartBlock;
+			break;
+		}
+	}
+
+	FILE *file = fopen(".disk", "r");
+	if(file != NULL){
+		fseek(file, startBlock, SEEK_SET);
+		fread(directory, sizeof(csc452_directory_entry), 1, file);
+		fclose(file);
+	}
+}
+
+void get_file(char *directory, char * file, char *extension){
+
+}
+
+void check_directory(char *directory){
+	int flag = 0;
+	csc452_root_directory *root;
+	open_root(root);
+	for(int i = 0; i < root.nDirectories; i++){
+		if(strcmp(directory, root.directories[i].dname) == 0){
+			flag = 1;
+			break; 
+		}
+	}
+
+	return flag;
+}
+
+void check_file(char *directory, char * file, char *extension){
+	int flag = -1;
+
+	if(check_directory(directory) == 0){
+		return flag;
+	} else {
+		csc452_directory_entry *entry;
+		get_directory(entry, directory);
+
+		for(int i = 0; i < entry.nFiles; i++){
+			if(strcmp(entry.files[i].fname, file) == 0){
+				if(entry.files[i].fext != NULL && strcmp(extension, entry.files[i].fext) == 0){
+					flag = entry.files[i].fsize;
+					break;
+				} else if(entry.files[i].fext == NULL && strcmp(extension, "\0") == 0){
+					flag = entry.files[i].fsize;
+					break;
+				}
+			}
+		}
+	}
+
+	return flag;
+}
+
+int split_path(const char *path, char *directory, char *filename, char *extension){
+	sscanf(path, "/%[^/]/%[^.].%s", directory, filename, extension);
+	directory[MAX_FILENAME] = '\0';
+	filename[MAX_FILENAME] = '\0';
+	extension[MAX_EXTENSION] = '\0';
+
+	int file_type = -1;
+
+	if(strcmp(directory, '\0') != 0){
+		file_type += 1;
+	}
+
+	if(strcmp(file, '\0') != 0){
+		file_type += 1;
+	}
+
+	return file_type;
+}
 
 //Don't change this.
 int main(int argc, char *argv[])
