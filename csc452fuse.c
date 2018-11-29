@@ -82,10 +82,10 @@ typedef struct csc452_disk_block csc452_disk_block;
 
 //Prototypes
 void open_root(csc452_root_directory *root);
-void get_directory(csc452_directory_entry directory, char *directoryName);
+void get_directory(csc452_directory_entry *directory, char *directoryName);
 void get_file(char *directory, char * file, char *extension);
 int check_directory(char *directory);
-int check_file(char *directory, char * file, char *extension);
+int check_file(char *directory, char *file, char *extension);
 int split_path(const char *path, char *directory, char *filename, char *extension);
 
 /*
@@ -98,9 +98,9 @@ static int csc452_getattr(const char *path, struct stat *stbuf)
 {
 	int res = 0;
 
-	char *directory[MAX_FILENAME + 1];
-	char *file[MAX_FILENAME + 1];
-	char *extension[MAX_EXTENSION + 1];
+	char directory[MAX_FILENAME + 1];
+	char file[MAX_FILENAME + 1];
+	char extension[MAX_EXTENSION + 1];
 
 	int file_type = split_path(path, directory, file, extension);
 
@@ -159,16 +159,18 @@ static int csc452_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	(void) offset;
 	(void) fi;
 
-    char *directory, file, extension = NULL;
+    char directory[MAX_FILENAME + 1];
+	char file[MAX_FILENAME + 1];
+	char extension[MAX_EXTENSION + 1];
     int fileOrDir = split_path(path, directory, file, extension);
 
     if(strcmp(path, "/") == 0) {
 		filler(buf, ".", NULL,0);
 		filler(buf, "..", NULL, 0);
         
-		csc452_root_directory *root;
+		csc452_root_directory *root = NULL;
 		open_root(root);
-        for(int i = 0; i < root->directories.length; i++) {
+        for(int i = 0; i < MAX_DIRS_IN_ROOT; i++) {
             if(strcmp(root->directories[i].dname, "\0") != 0) {
                 filler(buf, root->directories[i].dname, NULL, 0);
             }
@@ -178,9 +180,9 @@ static int csc452_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		filler(buf, ".", NULL,0);
 		filler(buf, "..", NULL, 0);
         
-        csc452_directory_entry *entry;
+        csc452_directory_entry *entry = NULL;
         get_directory(entry, directory);
-        for(int i = 0; i < entry->files.length; i++) {
+        for(int i = 0; i < MAX_FILES_IN_DIR; i++) {
             if(strcmp(entry->files[i].fname, "\0") != 0) {
                 if(strcmp(entry->files[i].fext, "\0") == 0) { 
                     filler(buf, entry->files[i].fname, NULL, 0);
@@ -210,9 +212,9 @@ static int csc452_mkdir(const char *path, mode_t mode)
 	(void) path;
 	(void) mode;
 
-	char *directory[MAX_FILENAME + 1];
-	char *file[MAX_FILENAME + 1];
-	char *extension[MAX_EXTENSION + 1];
+	char directory[MAX_FILENAME + 1];
+	char file[MAX_FILENAME + 1];
+	char extension[MAX_EXTENSION + 1];
 
 	int type = split_path(path, directory, file, extension);
 
@@ -230,10 +232,10 @@ static int csc452_mkdir(const char *path, mode_t mode)
 		return -EEXIST;
 	}
 
-	csc452_root_directory *root;
+	csc452_root_directory *root = NULL;
 	open_root(root);
 
-	if(root.nDirectories >= MAX_DIRS_IN_ROOT){
+	if(root->nDirectories >= MAX_DIRS_IN_ROOT){
 		printf("The directory could not be created, you have reached the maximum directories allowed in the root.\n");
 		return -1;
 	}
@@ -242,18 +244,19 @@ static int csc452_mkdir(const char *path, mode_t mode)
 
 	for(int i = 1; i <= root->nDirectories; i++){
 		blockPos *= i;
-		if(strcmp(root.directories[i-1].dname, "\0") == 0){
+		if(strcmp(root->directories[i-1].dname, "\0") == 0){
 			//Create directory entry
 			csc452_directory_entry *newDir = malloc(sizeof(csc452_directory_entry));
 			newDir->nFiles = 0;
 			FILE *file = fopen(".disk", "r");
-			root->directories[i-1].dname = directory;
+			strcpy(root->directories[i-1].dname, directory);
 			root->directories[i-1].nStartBlock = blockPos;
+			root->nDirectories += 1;
 			//Update disk
 			fwrite(root, BLOCK_SIZE, 1, file);
 			fseek(file, blockPos, SEEK_SET);
 			fwrite(newDir, BLOCK_SIZE, 1, file);
-			fclose();
+			fclose(file);
 		}
 	}
 		
@@ -326,9 +329,9 @@ static int csc452_write(const char *path, const char *buf, size_t size,
 static int csc452_rmdir(const char *path)
 {
 	int res = 0;
-	char *directory[MAX_FILENAME + 1];
-	char *file[MAX_FILENAME + 1];
-	char *extension[MAX_EXTENSION + 1];
+	char directory[MAX_FILENAME + 1];
+	char file[MAX_FILENAME + 1];
+	char extension[MAX_EXTENSION + 1];
 
 	int file_type = split_path(path, directory, file, extension);
 
@@ -337,22 +340,22 @@ static int csc452_rmdir(const char *path)
 		return res;
 	}
 
-	if(check_directory(directory != 1)){
+	if(check_directory(directory) != 1){
 		res = -ENOENT;
 		return res;
 	}
 
-	csc452_directory_entry *entry;
+	csc452_directory_entry *entry = NULL;
 	get_directory(entry, directory);
 
-	if(entry.nFiles > 0){
+	if(entry->nFiles > 0){
 		res = -ENOTEMPTY;
 	} else{
-		csc452_root_directory *root;
+		csc452_root_directory *root = NULL;
 		open_root(root);
 
-		for(int i = 0; i < root.nDirectories; i++){
-			if(strcmp(directoryName, root.directories[i].dname) == 0){
+		for(int i = 0; i < MAX_DIRS_IN_ROOT; i++){
+			if(strcmp(directory, root->directories[i].dname) == 0){
 				// remove this directory
 			}
 		}
@@ -457,10 +460,10 @@ void open_root(csc452_root_directory *root){
 
 void get_directory(csc452_directory_entry *directory, char *directoryName){
 	long startBlock = 0;
-	csc452_root_directory *root;
+	csc452_root_directory *root = NULL;
 	open_root(root);
 
-	for(int i = 0; i < root->directories.length; i++){
+	for(int i = 0; i < MAX_DIRS_IN_ROOT; i++){
 		if(strcmp(directoryName, root->directories[i].dname) == 0){
 			startBlock = root->directories[i].nStartBlock;
 			break;
@@ -481,10 +484,10 @@ void get_file(char *directory, char * file, char *extension){
 
 int check_directory(char *directory){
 	int flag = 0;
-	csc452_root_directory *root;
+	csc452_root_directory *root = NULL;
 	open_root(root);
-	for(int i = 0; i < root.nDirectories; i++){
-		if(strcmp(directory, root.directories[i].dname) == 0){
+	for(int i = 0; i < root->nDirectories; i++){
+		if(strcmp(directory, root->directories[i].dname) == 0){
 			flag = 1;
 			break; 
 		}
@@ -499,16 +502,16 @@ int check_file(char *directory, char * file, char *extension){
 	if(check_directory(directory) == 0){
 		return flag;
 	} else {
-		csc452_directory_entry *entry;
+		csc452_directory_entry *entry = NULL;
 		get_directory(entry, directory);
 
-		for(int i = 0; i < entry.nFiles; i++){
-			if(strcmp(entry.files[i].fname, file) == 0){
-				if(entry.files[i].fext != NULL && strcmp(extension, entry.files[i].fext) == 0){
-					flag = entry.files[i].fsize;
+		for(int i = 0; i < entry->nFiles; i++){
+			if(strcmp(entry->files[i].fname, file) == 0){
+				if(entry->files[i].fext != NULL && strcmp(extension, entry->files[i].fext) == 0){
+					flag = entry->files[i].fsize;
 					break;
-				} else if(entry.files[i].fext == NULL && strcmp(extension, "\0") == 0){
-					flag = entry.files[i].fsize;
+				} else if(entry->files[i].fext == NULL && strcmp(extension, "\0") == 0){
+					flag = entry->files[i].fsize;
 					break;
 				}
 			}
@@ -518,19 +521,19 @@ int check_file(char *directory, char * file, char *extension){
 	return flag;
 }
 
-int split_path(const char *path, char *directory, char *filename, char *extension){
-	sscanf(path, "/%[^/]/%[^.].%s", directory, filename, extension);
+int split_path(const char *path, char *directory, char *file, char *extension){
+	sscanf(path, "/%[^/]/%[^.].%s", directory, file, extension);
 	directory[MAX_FILENAME] = '\0';
-	filename[MAX_FILENAME] = '\0';
+	file[MAX_FILENAME] = '\0';
 	extension[MAX_EXTENSION] = '\0';
 
 	int file_type = -1;
 
-	if(strcmp(directory, '\0') != 0){
+	if(strcmp(directory, "\0") != 0){
 		file_type += 1;
 	}
 
-	if(strcmp(file, '\0') != 0){
+	if(strcmp(file, "\0") != 0){
 		file_type += 1;
 	}
 
