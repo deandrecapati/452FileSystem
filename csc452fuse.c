@@ -98,12 +98,11 @@ static int csc452_getattr(const char *path, struct stat *stbuf)
 {
 	int res = 0;
 
-	char directory[MAX_FILENAME + 1];
-	char file[MAX_FILENAME + 1];
-	char extension[MAX_EXTENSION + 1];
+	char directory[MAX_FILENAME + 1] = "";
+	char file[MAX_FILENAME + 1] = "";
+	char extension[MAX_EXTENSION + 1] = "";
 
 	int file_type = split_path(path, directory, file, extension);
-
 	if (strcmp(path, "/") == 0) {
 		stbuf->st_mode = S_IFDIR | 0755;
 		stbuf->st_nlink = 2;
@@ -209,9 +208,9 @@ static int csc452_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
  */
 static int csc452_mkdir(const char *path, mode_t mode)
 {
-	(void) path;
-	(void) mode;
-
+	//(void) path;
+	//(void) mode;
+	fflush(0);
 	char directory[MAX_FILENAME + 1];
 	char file[MAX_FILENAME + 1];
 	char extension[MAX_EXTENSION + 1];
@@ -243,12 +242,14 @@ static int csc452_mkdir(const char *path, mode_t mode)
 	long blockPos = 512;
 
 	for(int i = 1; i <= root->nDirectories; i++){
+		printf("Looping through directories...\n");
+		fflush(0);
 		blockPos *= i;
 		if(strcmp(root->directories[i-1].dname, "\0") == 0){
 			//Create directory entry
 			csc452_directory_entry *newDir = malloc(sizeof(csc452_directory_entry));
 			newDir->nFiles = 0;
-			FILE *file = fopen(".disk", "r");
+			FILE *file = fopen(".disk", "r+b");
 			strcpy(root->directories[i-1].dname, directory);
 			root->directories[i-1].nStartBlock = blockPos;
 			root->nDirectories += 1;
@@ -329,9 +330,9 @@ static int csc452_write(const char *path, const char *buf, size_t size,
 static int csc452_rmdir(const char *path)
 {
 	int res = 0;
-	char directory[MAX_FILENAME + 1];
-	char file[MAX_FILENAME + 1];
-	char extension[MAX_EXTENSION + 1];
+	char directory[MAX_FILENAME + 1] = "";
+	char file[MAX_FILENAME + 1] = "";
+	char extension[MAX_EXTENSION + 1] = "";
 
 	int file_type = split_path(path, directory, file, extension);
 
@@ -451,9 +452,12 @@ static struct fuse_operations csc452_oper = {
 };
 
 void open_root(csc452_root_directory *root){
-	FILE *file = fopen(".disk", "r");
+	FILE *file = fopen(".disk", "r+b");
 	if(file != NULL){
-		fread(root, sizeof(csc452_root_directory), 1, file);
+		if(fread(root, sizeof(csc452_root_directory), 1, file) == (size_t)0){
+			printf("File could not be read\n");
+			return;
+		}
 		fclose(file);
 	}
 }
@@ -484,10 +488,10 @@ void get_file(char *directory, char * file, char *extension){
 
 int check_directory(char *directory){
 	int flag = 0;
-	csc452_root_directory *root = NULL;
-	open_root(root);
-	for(int i = 0; i < root->nDirectories; i++){
-		if(strcmp(directory, root->directories[i].dname) == 0){
+	csc452_root_directory root;
+	open_root(&root);
+	for(int i = 0; i < root.nDirectories; i++){
+		if(strcmp(directory, root.directories[i].dname) == 0){
 			flag = 1;
 			break; 
 		}
