@@ -208,9 +208,8 @@ static int csc452_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
  */
 static int csc452_mkdir(const char *path, mode_t mode)
 {
-	//(void) path;
-	//(void) mode;
-	fflush(0);
+	(void) path;
+	(void) mode;
 	char directory[MAX_FILENAME + 1];
 	char file[MAX_FILENAME + 1];
 	char extension[MAX_EXTENSION + 1];
