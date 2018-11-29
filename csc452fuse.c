@@ -210,6 +210,53 @@ static int csc452_mkdir(const char *path, mode_t mode)
 	(void) path;
 	(void) mode;
 
+	char *directory[MAX_FILENAME + 1];
+	char *file[MAX_FILENAME + 1];
+	char *extension[MAX_EXTENSION + 1];
+
+	int type = split_path(path, directory, file, extension);
+
+	if(strlen(directory) > MAX_FILENAME){
+		return -ENAMETOOLONG;
+	}
+
+	if(type > 0 || type < 0){
+		return -EPERM;
+	}
+
+	int flag = check_directory(directory);
+
+	if(flag != 0){
+		return -EEXIST;
+	}
+
+	csc452_root_directory *root;
+	open_root(root);
+
+	if(root.nDirectories >= MAX_DIRS_IN_ROOT){
+		printf("The directory could not be created, you have reached the maximum directories allowed in the root.\n");
+		return -1;
+	}
+
+	long blockPos = 512;
+
+	for(int i = 1; i <= root->nDirectories; i++){
+		blockPos *= i;
+		if(strcmp(root.directories[i-1].dname, "\0") == 0){
+			//Create directory entry
+			csc452_directory_entry *newDir = malloc(sizeof(csc452_directory_entry));
+			newDir->nFiles = 0;
+			FILE *file = fopen(".disk", "r");
+			root->directories[i-1].dname = directory;
+			root->directories[i-1].nStartBlock = blockPos;
+			//Update disk
+			fwrite(root, BLOCK_SIZE, 1, file);
+			fseek(file, blockPos, SEEK_SET);
+			fwrite(newDir, BLOCK_SIZE, 1, file);
+			fclose();
+		}
+	}
+		
 	return 0;
 }
 
