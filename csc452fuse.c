@@ -80,13 +80,22 @@ struct csc452_disk_block
 
 typedef struct csc452_disk_block csc452_disk_block;
 
+
+int get_fat_block_count();
+
+#define FAT_BLOCK_COUNT get_fat_block_count()
+#define FAT_BLOCK_SIZE (FAT_BLOCK_COUNT * BLOCK_SIZE)
+#define FAT_ENTRIES (FAT_BLOCK_SIZE - FAT_BLOCK_COUNT)
+
 //Prototypes
 void open_root(csc452_root_directory *root);
+void open_fat(short *fat_table);
 void get_directory(csc452_directory_entry *directory, char *directoryName);
 void get_file(char *directory, char * file, char *extension);
 int check_directory(char *directory);
 int check_file(char *directory, char *file, char *extension);
 int split_path(const char *path, char *directory, char *filename, char *extension);
+
 
 /*
  * Called whenever the system wants to know the file attributes, including
@@ -215,7 +224,7 @@ static int csc452_mkdir(const char *path, mode_t mode)
 	char directory[MAX_FILENAME + 1] = "";
 	char file[MAX_FILENAME + 1] = "";
 	char extension[MAX_EXTENSION + 1] = "";
-
+	int res = 0;
 	int type = split_path(path, directory, file, extension);
 
 	if(strlen(directory) > MAX_FILENAME){
@@ -245,36 +254,50 @@ static int csc452_mkdir(const char *path, mode_t mode)
 	}
 
 	csc452_root_directory root;
+	short fat[FAT_BLOCK_SIZE];
 	open_root(&root);
+	open_fat(fat);
+
+	printf("directory numbers: %d\n", root.nDirectories);
+	fflush(0);
+
+	printf("directory numbers: %d\n", MAX_DIRS_IN_ROOT);
+	fflush(0);
 
 	if(root.nDirectories >= MAX_DIRS_IN_ROOT){
 		printf("The directory could not be created, you have reached the maximum directories allowed in the root.\n");
 		return -1;
 	}
 
-	long blockPos = 512;
+	long blockPos = BLOCK_SIZE;
+	root.nDirectories += 1;
 
-	for(int i = 1; i <= root.nDirectories; i++){
-		printf("Looping through directories...\n");
-		fflush(0);
+	for(int i = 1; i <= FAT_ENTRIES; i++){
 		blockPos *= i;
-		if(strcmp(root.directories[i-1].dname, "\0") == 0){
+		if(fat[i] == 0){
+			//Update FAT table to mark the directory
+			fat[i] = -1;
 			//Create directory entry
 			csc452_directory_entry *newDir = malloc(sizeof(csc452_directory_entry));
 			newDir->nFiles = 0;
 			FILE *file = fopen(".disk", "r+b");
-			strcpy(root.directories[i-1].dname, directory);
-			root.directories[i-1].nStartBlock = blockPos;
-			root.nDirectories += 1;
+			strcpy(root.directories[root.nDirectories-1].dname, directory);
+			root.directories[root.nDirectories-1].nStartBlock = blockPos;
 			//Update disk
 			fwrite(&root, BLOCK_SIZE, 1, file);
 			fseek(file, blockPos, SEEK_SET);
 			fwrite(newDir, BLOCK_SIZE, 1, file);
+			fseek(file, -FAT_BLOCK_SIZE, SEEK_END);
+			fwrite(fat, FAT_BLOCK_SIZE, 1, file);
 			fclose(file);
+			break;
+		} 
+		else if(i == FAT_ENTRIES){
+			printf("The disk is full.\n");
+			res = -1;
 		}
 	}
-		
-	return 0;
+	return res;
 }
 
 /*
@@ -349,7 +372,7 @@ static int csc452_rmdir(const char *path)
 
 	int file_type = split_path(path, directory, file, extension);
 
-	if(strcmp(file, "\0") == 0){
+	if(strcmp(file, "\0") != 0){
 		res = -ENOTDIR;
 		return res;
 	}
@@ -366,11 +389,13 @@ static int csc452_rmdir(const char *path)
 		res = -ENOTEMPTY;
 	} else{
 		csc452_root_directory root;
+		short fat[FAT_BLOCK_SIZE];
 		open_root(&root);
+		open_fat(fat);
 
-		for(int i = 0; i < MAX_DIRS_IN_ROOT; i++){
+		for(int i = 0; i < root.nDirectories; i++){
 			if(strcmp(directory, root.directories[i].dname) == 0){
-				// remove this directory
+				printf("FAT Enry Val: %d\n", fat[root.directories[i].nStartBlock/BLOCK_SIZE]);
 			}
 		}
 	}
@@ -475,6 +500,18 @@ void open_root(csc452_root_directory *root){
 	}
 }
 
+void open_fat(short *fat_table){
+	FILE *file = fopen(".disk", "r+b");
+	if(file != NULL){
+		fseek(file, -FAT_BLOCK_SIZE, SEEK_END);
+		if(fread(fat_table, FAT_BLOCK_SIZE, 1, file) == (size_t)0){
+			printf("File could not be read\n");
+			return;
+		}
+		fclose(file);
+	}
+}
+
 void get_directory(csc452_directory_entry *directory, char *directoryName){
 	long startBlock = 0;
 	csc452_root_directory root;
@@ -555,6 +592,19 @@ int split_path(const char *path, char *directory, char *file, char *extension){
 	}
 
 	return file_type;
+}
+
+int get_fat_block_count(){
+	FILE *file = fopen(".disk", "r+b");
+	int size = 0;
+	if(file != NULL){
+		fseek(file, 0, SEEK_END);
+		size = ftell(file);
+		fclose(file);
+	}
+
+	size = ((size/BLOCK_SIZE) * sizeof(short))/BLOCK_SIZE;
+	return size;
 }
 
 //Don't change this.
