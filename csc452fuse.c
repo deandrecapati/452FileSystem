@@ -110,6 +110,7 @@ static int csc452_getattr(const char *path, struct stat *stbuf)
 	char directory[MAX_FILENAME + 1] = "";
 	char file[MAX_FILENAME + 1] = "";
 	char extension[MAX_EXTENSION + 1] = "";
+    int fsize = -1;
 
 	int file_type = split_path(path, directory, file, extension);
 	if (strcmp(path, "/") == 0) {
@@ -120,10 +121,10 @@ static int csc452_getattr(const char *path, struct stat *stbuf)
 		stbuf->st_mode = S_IFDIR | 0755;
 		stbuf->st_nlink = 2;
 	}
-	else if(file_type == 1 && check_file(directory, file, extension) != -1) {
+	else if(file_type == 1 && (fsize = check_file(directory, file, extension)) != -1) {
 		stbuf->st_mode = S_IFREG | 0666;
 		stbuf->st_nlink = 2;
-		stbuf->st_size = flag;
+		stbuf->st_size = fsize;
 	} 
 	else {
 		//Else return that path doesn't exist
@@ -157,7 +158,7 @@ static int csc452_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
         
 		csc452_root_directory root;
 		open_root(&root);
-        for(int i = 0; i < MAX_DIRS_IN_ROOT; i++) {
+        for(int i = 0; i < root.nDirectories; i++) {
             if(strcmp(root.directories[i].dname, "\0") != 0) {
                 filler(buf, root.directories[i].dname, NULL, 0);
             }
