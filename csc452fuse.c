@@ -116,40 +116,19 @@ static int csc452_getattr(const char *path, struct stat *stbuf)
 		stbuf->st_mode = S_IFDIR | 0755;
 		stbuf->st_nlink = 2;
 	} 
-	else {
-		if(file_type == 0) {
-			int flag = check_directory(directory);
-			if(flag == 1){
-				stbuf->st_mode = S_IFDIR | 0755;
-				stbuf->st_nlink = 2;
-			} else{
-				res = -ENOENT;
-			}
-		} 
-		else if(file_type == 1){
-			int flag = check_file(directory, file, extension);
-			if(flag != -1){
-				stbuf->st_mode = S_IFREG | 0666;
-				stbuf->st_nlink = 2;
-				stbuf->st_size = flag;
-			} else{
-				res = -ENOENT;
-			}
-		} 
-		else{
-			//Else return that path doesn't exist
-			res = -ENOENT;
-		}
-		//If the path does exist and is a directory:
-		//stbuf->st_mode = S_IFDIR | 0755;
-		//stbuf->st_nlink = 2;
-
-		//If the path does exist and is a file:
-		//stbuf->st_mode = S_IFREG | 0666;
-		//stbuf->st_nlink = 2;
-		//stbuf->st_size = file size
+	else if(file_type == 0 && check_directory(directory == 1)) {
+		stbuf->st_mode = S_IFDIR | 0755;
+		stbuf->st_nlink = 2;
 	}
-
+	else if(file_type == 1 && check_file(directory, file, extension) != -1) {
+		stbuf->st_mode = S_IFREG | 0666;
+		stbuf->st_nlink = 2;
+		stbuf->st_size = flag;
+	} 
+	else {
+		//Else return that path doesn't exist
+		res = -ENOENT;
+	}
 	return res;
 }
 
