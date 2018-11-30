@@ -85,7 +85,7 @@ int get_fat_block_count();
 
 #define FAT_BLOCK_COUNT get_fat_block_count()
 #define FAT_BLOCK_SIZE (FAT_BLOCK_COUNT * BLOCK_SIZE)
-#define FAT_ENTRIES (FAT_BLOCK_SIZE - FAT_BLOCK_COUNT)
+#define FAT_ENTRIES ((FAT_BLOCK_SIZE / sizeof(short)) - FAT_BLOCK_COUNT)
 
 //Prototypes
 void open_root(csc452_root_directory *root);
@@ -95,6 +95,7 @@ void get_file(char *directory, char * file, char *extension);
 int check_directory(char *directory);
 int check_file(char *directory, char *file, char *extension);
 int split_path(const char *path, char *directory, char *filename, char *extension);
+void remove_directory(int pos, csc452_root_directory *root);
 
 
 /*
@@ -197,8 +198,6 @@ static int csc452_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
  */
 static int csc452_mkdir(const char *path, mode_t mode)
 {
-	printf("mkdir called \n");
-	fflush(0);
 	(void) path;
 	(void) mode;
 	char directory[MAX_FILENAME + 1] = "";
@@ -240,15 +239,17 @@ static int csc452_mkdir(const char *path, mode_t mode)
 			//Update FAT table to mark the directory
 			fat[i] = -1;
 			//Create directory entry
-			csc452_directory_entry *newDir = malloc(sizeof(csc452_directory_entry));
-			newDir->nFiles = 0;
+			csc452_directory_entry newDir;
+			newDir.nFiles = 0;
 			FILE *file = fopen(".disk", "r+b");
 			strcpy(root.directories[root.nDirectories-1].dname, directory);
 			root.directories[root.nDirectories-1].nStartBlock = blockPos;
+
 			//Update disk
+			fseek(file, 0, SEEK_SET);
 			fwrite(&root, BLOCK_SIZE, 1, file);
 			fseek(file, blockPos, SEEK_SET);
-			fwrite(newDir, BLOCK_SIZE, 1, file);
+			fwrite(&newDir, BLOCK_SIZE, 1, file);
 			fseek(file, -FAT_BLOCK_SIZE, SEEK_END);
 			fwrite(fat, FAT_BLOCK_SIZE, 1, file);
 			fclose(file);
@@ -354,18 +355,20 @@ static int csc452_rmdir(const char *path)
 		short fat[FAT_BLOCK_SIZE];
 		open_root(&root);
 		open_fat(fat);
-
+		printf("number of directories: %d\n", root.nDirectories);
+		fflush(0);
 		for(int i = 0; i < root.nDirectories; i++){
 			if(strcmp(directory, root.directories[i].dname) == 0){
-				strcpy(root.directories[i].dname, "");
-				root.nDirectories -= 1;
 				fat[root.directories[i].nStartBlock/BLOCK_SIZE] = 0;
+				remove_directory(i, &root);
 				//Update disk
 				FILE *file = fopen(".disk", "r+b");
+				fseek(file, 0, SEEK_SET);
 				fwrite(&root, BLOCK_SIZE, 1, file);
 				fseek(file, -FAT_BLOCK_SIZE, SEEK_END);
 				fwrite(fat, FAT_BLOCK_SIZE, 1, file);
 				fclose(file);
+				break;
 			}
 		}
 	}
@@ -543,6 +546,18 @@ int check_file(char *directory, char * file, char *extension){
 	}
 
 	return flag;
+}
+
+void remove_directory(int pos, csc452_root_directory *root){
+	if(pos == (root->nDirectories - 1)){
+		strcpy(root->directories[pos].dname, "\0");
+		root->nDirectories -= 1;
+	}
+	else{
+		root->directories[pos] = root->directories[root->nDirectories-1];
+		strcpy(root->directories[root->nDirectories-1].dname, "\0");
+		root->nDirectories -=1;
+	}
 }
 
 int split_path(const char *path, char *directory, char *file, char *extension){
