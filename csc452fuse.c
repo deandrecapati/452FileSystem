@@ -166,19 +166,19 @@ static int csc452_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     else if(fileOrDir == 0 && check_directory(directory) == 1) {
 		filler(buf, ".", NULL,0);
 		filler(buf, "..", NULL, 0);
-        
-        csc452_directory_entry *entry = NULL;
-        get_directory(entry, directory);
-        for(int i = 0; i < MAX_FILES_IN_DIR; i++) {
-            if(strcmp(entry->files[i].fname, "\0") != 0) {
-                if(strcmp(entry->files[i].fext, "\0") == 0) { 
-                    filler(buf, entry->files[i].fname, NULL, 0);
+
+        csc452_directory_entry entry;
+        get_directory(&entry, directory);
+        for(int i = 0; i < entry.nFiles; i++) {
+            if(strcmp(entry.files[i].fname, "\0") != 0) {
+                if(strcmp(entry.files[i].fext, "\0") == 0) { 
+                    filler(buf, entry.files[i].fname, NULL, 0);
                 }
                 else {
                     char fullFileName[MAX_FILENAME + MAX_EXTENSION + 2];
-                    strcpy(fullFileName, entry->files[i].fname);
+                    strcpy(fullFileName, entry.files[i].fname);
                     strcat(fullFileName, ".");
-                    strcat(fullFileName, entry->files[i].fext);
+                    strcat(fullFileName, entry.files[i].fext);
                     filler(buf, fullFileName, NULL, 0);
                 }
              }
@@ -210,23 +210,11 @@ static int csc452_mkdir(const char *path, mode_t mode)
 		return -ENAMETOOLONG;
 	}
 
-	printf("name not too long \n");
-	fflush(0);
-
-	printf("file type: %d \n", type);
-	fflush(0);
-
 	if(type != 0){
 		return -EPERM;
 	}
 
-	printf("type check \n");
-	fflush(0);
-
 	int flag = check_directory(directory);
-
-	printf("directory flag: %d\n", flag);
-	fflush(0);
 
 	if(flag != 0){
 		return -EEXIST;
@@ -236,12 +224,6 @@ static int csc452_mkdir(const char *path, mode_t mode)
 	short fat[FAT_BLOCK_SIZE];
 	open_root(&root);
 	open_fat(fat);
-
-	printf("directory numbers: %d\n", root.nDirectories);
-	fflush(0);
-
-	printf("directory numbers: %d\n", MAX_DIRS_IN_ROOT);
-	fflush(0);
 
 	if(root.nDirectories >= MAX_DIRS_IN_ROOT){
 		printf("The directory could not be created, you have reached the maximum directories allowed in the root.\n");
@@ -361,10 +343,10 @@ static int csc452_rmdir(const char *path)
 		return res;
 	}
 
-	csc452_directory_entry *entry = NULL;
-	get_directory(entry, directory);
+	csc452_directory_entry entry;
+	get_directory(&entry, directory);
 
-	if(entry->nFiles > 0){
+	if(entry.nFiles > 0){
 		res = -ENOTEMPTY;
 	} else{
 		csc452_root_directory root;
@@ -374,7 +356,15 @@ static int csc452_rmdir(const char *path)
 
 		for(int i = 0; i < root.nDirectories; i++){
 			if(strcmp(directory, root.directories[i].dname) == 0){
-				printf("FAT Enry Val: %d\n", fat[root.directories[i].nStartBlock/BLOCK_SIZE]);
+				strcpy(root.directories[i].dname, "");
+				root.nDirectories -= 1;
+				fat[root.directories[i].nStartBlock/BLOCK_SIZE] = 0;
+				//Update disk
+				FILE *file = fopen(".disk", "r+b");
+				fwrite(&root, BLOCK_SIZE, 1, file);
+				fseek(file, -FAT_BLOCK_SIZE, SEEK_END);
+				fwrite(fat, FAT_BLOCK_SIZE, 1, file);
+				fclose(file);
 			}
 		}
 	}
