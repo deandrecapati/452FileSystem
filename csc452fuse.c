@@ -83,7 +83,7 @@ typedef struct csc452_disk_block csc452_disk_block;
 
 int get_fat_block_count();
 
-#define FAT_BLOCK_COUNT get_fat_block_count()
+#define FAT_BLOCK_COUNT 40
 #define FAT_BLOCK_SIZE (FAT_BLOCK_COUNT * BLOCK_SIZE)
 #define FAT_ENTRIES ((FAT_BLOCK_SIZE / sizeof(short)) - FAT_BLOCK_COUNT)
 
@@ -118,7 +118,7 @@ static int csc452_getattr(const char *path, struct stat *stbuf)
 		stbuf->st_mode = S_IFDIR | 0755;
 		stbuf->st_nlink = 2;
 	} 
-	else if(file_type == 0 && check_directory(directory == 1)) {
+	else if(file_type == 0 && check_directory(directory) == 1) {
 		stbuf->st_mode = S_IFDIR | 0755;
 		stbuf->st_nlink = 2;
 	}
@@ -221,7 +221,7 @@ static int csc452_mkdir(const char *path, mode_t mode)
 	}
 
 	csc452_root_directory root;
-	short fat[FAT_BLOCK_SIZE];
+	short fat[FAT_ENTRIES];
 	open_root(&root);
 	open_fat(fat);
 
@@ -233,7 +233,7 @@ static int csc452_mkdir(const char *path, mode_t mode)
 	long blockPos = BLOCK_SIZE;
 	root.nDirectories += 1;
 
-	for(int i = 1; i <= FAT_ENTRIES; i++){
+	for(int i = 1; i < FAT_ENTRIES; i++){
 		blockPos *= i;
 		if(fat[i] == 0){
 			//Update FAT table to mark the directory
@@ -255,7 +255,7 @@ static int csc452_mkdir(const char *path, mode_t mode)
 			fclose(file);
 			break;
 		} 
-		else if(i == FAT_ENTRIES){
+		else if(i+1 == FAT_ENTRIES){
 			printf("The disk is full.\n");
 			res = -1;
 		}
@@ -277,7 +277,66 @@ static int csc452_mknod(const char *path, mode_t mode, dev_t dev)
 	(void) mode;
     (void) dev;
 	
-	return 0;
+	char directory[MAX_FILENAME + 1] = "";
+	char file[MAX_FILENAME + 1] = "";
+	char extension[MAX_EXTENSION + 1] = "";
+	int res = 0;
+
+	if(strcmp(path, "/") == 0){
+		res = -EPERM;
+	}
+	else if(strlen(file) > MAX_FILENAME){
+		res = -ENAMETOOLONG;
+	}
+	else if(check_file(directory, file, extension) > 0){
+		res = -EEXIST;
+	}
+	else{
+		csc452_directory_entry entry;
+		short fat[FAT_ENTRIES];
+		get_directory(&entry, directory);
+		open_fat(fat);
+
+		long blockPos = BLOCK_SIZE;
+		printf("Incrementing nFIles\n");
+		fflush(0);
+		entry.nFiles += 1;
+		printf("nFiles icremented\n");
+		fflush(0);
+
+		for(int i = 1; i < FAT_ENTRIES; i++){
+			blockPos *= i;
+			printf("block: %d\n", blockPos);
+			fflush(0);
+			printf("fat: %d", fat[i]);
+			fflush(0);
+			if(fat[i] == 0){
+				//Update FAT table to mark the file location
+				fat[i] = -1;
+				//Create directory entry
+				printf("creating new file...\n");
+				fflush(0);
+				FILE *newFile;
+				entry.files[entry.nFiles-1].nStartBlock = blockPos;
+				strcpy(entry.files[entry.nFiles-1].fname, file);
+				
+				//Update disk
+				FILE *file = fopen(".disk", "r+b");
+				fseek(file, blockPos, SEEK_SET);
+				fwrite(&newFile, BLOCK_SIZE, 1, file);
+				fseek(file, -FAT_BLOCK_SIZE, SEEK_END);
+				fwrite(fat, FAT_BLOCK_SIZE, 1, file);
+				fclose(file);
+				break;
+			} 
+			else if(i+1 == FAT_ENTRIES){
+				printf("The disk is full.\n");
+				res = -1;
+			}
+		}
+	}
+
+	return res;
 }
 
 /*
@@ -352,7 +411,7 @@ static int csc452_rmdir(const char *path)
 		res = -ENOTEMPTY;
 	} else{
 		csc452_root_directory root;
-		short fat[FAT_BLOCK_SIZE];
+		short fat[FAT_ENTRIES];
 		open_root(&root);
 		open_fat(fat);
 		printf("number of directories: %d\n", root.nDirectories);
@@ -475,9 +534,10 @@ void open_root(csc452_root_directory *root){
 
 void open_fat(short *fat_table){
 	FILE *file = fopen(".disk", "r+b");
+
 	if(file != NULL){
-		fseek(file, -FAT_BLOCK_SIZE, SEEK_END);
-		if(fread(fat_table, FAT_BLOCK_SIZE, 1, file) == (size_t)0){
+		fseek(file, -sizeof(fat_table), SEEK_END);
+		if(fread(fat_table, sizeof(fat_table), 1, file) == (size_t)0){
 			printf("File could not be read\n");
 			return;
 		}
@@ -528,17 +588,19 @@ int check_file(char *directory, char * file, char *extension){
 
 	if(check_directory(directory) == 0){
 		return flag;
-	} else {
-		csc452_directory_entry *entry = NULL;
-		get_directory(entry, directory);
+	} 
+	else {
+		csc452_directory_entry entry;
+		get_directory(&entry, directory);
 
-		for(int i = 0; i < entry->nFiles; i++){
-			if(strcmp(entry->files[i].fname, file) == 0){
-				if(entry->files[i].fext != NULL && strcmp(extension, entry->files[i].fext) == 0){
-					flag = entry->files[i].fsize;
+		for(int i = 0; i < entry.nFiles; i++){
+			if(strcmp(entry.files[i].fname, file) == 0){
+				if(entry.files[i].fext != NULL && strcmp(extension, entry.files[i].fext) == 0){
+					flag = entry.files[i].fsize;
 					break;
-				} else if(entry->files[i].fext == NULL && strcmp(extension, "\0") == 0){
-					flag = entry->files[i].fsize;
+				} 
+				else if(entry.files[i].fext == NULL && strcmp(extension, "\0") == 0){
+					flag = entry.files[i].fsize;
 					break;
 				}
 			}
