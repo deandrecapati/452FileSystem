@@ -292,7 +292,15 @@ static int csc452_read(const char *path, char *buf, size_t size, off_t offset,
 	(void) fi;
 	(void) path;
 
-	//check to make sure path exists
+	char directory[MAX_FILENAME + 1] = "";
+	char file[MAX_FILENAME + 1] = "";
+	char extension[MAX_EXTENSION + 1] = "";
+
+	int file_type = split_path(path, directory, file, extension);
+    
+    	
+
+    //check to make sure path exists
 	//check that size is > 0
 	//check that offset is <= to the file size
 	//read in data
@@ -313,7 +321,27 @@ static int csc452_write(const char *path, const char *buf, size_t size,
 	(void) fi;
 	(void) path;
 
-	//check to make sure path exists
+    char directory[MAX_FILENAME + 1];
+	char file[MAX_FILENAME + 1];
+	char extension[MAX_EXTENSION + 1];
+    int fileOrDir = split_path(path, directory, file, extension);
+
+    if(check_directory(directory) = 1) {
+       size = -1; 
+    } 
+    else if(check_file(file) == -1) {
+        // DUNNO WHAT THE FUCK HAPPENS WHEN FILE DOESN'T EXIST
+    }
+    else {    
+        
+        
+        
+        csc452_disk_block block;
+        
+    }
+	
+
+    //check to make sure path exists
 	//check that size is > 0
 	//check that offset is <= to the file size
 	//write data
@@ -335,44 +363,42 @@ static int csc452_rmdir(const char *path)
 
 	int file_type = split_path(path, directory, file, extension);
 
-	if(strcmp(file, "\0") != 0){
+	if(strcmp(file, "\0") != 0) {
 		res = -ENOTDIR;
-		return res;
 	}
-
-	if(check_directory(directory) != 1){
+	else if(check_directory(directory) != 1) {
 		res = -ENOENT;
-		return res;
 	}
+    else {
+	    csc452_directory_entry entry;
+	    get_directory(&entry, directory);
 
-	csc452_directory_entry entry;
-	get_directory(&entry, directory);
-
-	if(entry.nFiles > 0){
-		res = -ENOTEMPTY;
-	} else{
-		csc452_root_directory root;
-		short fat[FAT_BLOCK_SIZE];
-		open_root(&root);
-		open_fat(fat);
-		printf("number of directories: %d\n", root.nDirectories);
-		fflush(0);
-		for(int i = 0; i < root.nDirectories; i++){
-			if(strcmp(directory, root.directories[i].dname) == 0){
-				fat[root.directories[i].nStartBlock/BLOCK_SIZE] = 0;
-				remove_directory(i, &root);
-				//Update disk
-				FILE *file = fopen(".disk", "r+b");
-				fseek(file, 0, SEEK_SET);
-				fwrite(&root, BLOCK_SIZE, 1, file);
-				fseek(file, -FAT_BLOCK_SIZE, SEEK_END);
-				fwrite(fat, FAT_BLOCK_SIZE, 1, file);
-				fclose(file);
-				break;
-			}
-		}
-	}
-
+	    if(entry.nFiles > 0) {
+		    res = -ENOTEMPTY;
+	    } 
+        else {
+		    csc452_root_directory root;
+		    short fat[FAT_BLOCK_SIZE];
+		    open_root(&root);
+		    open_fat(fat);
+		    printf("number of directories: %d\n", root.nDirectories);
+		    fflush(0);
+		    for(int i = 0; i < root.nDirectories; i++){
+			    if(strcmp(directory, root.directories[i].dname) == 0){
+				    fat[root.directories[i].nStartBlock/BLOCK_SIZE] = 0;
+				    remove_directory(i, &root);
+				    //Update disk
+				    FILE *file = fopen(".disk", "r+b");
+				    fseek(file, 0, SEEK_SET);
+				    fwrite(&root, BLOCK_SIZE, 1, file);
+				    fseek(file, -FAT_BLOCK_SIZE, SEEK_END);
+				    fwrite(fat, FAT_BLOCK_SIZE, 1, file);
+				    fclose(file);
+				    break;
+			    }
+    		}
+    	}
+    }
 	return res;
 }
 
@@ -490,7 +516,7 @@ void get_directory(csc452_directory_entry *directory, char *directoryName){
 	csc452_root_directory root;
 	open_root(&root);
 
-	for(int i = 0; i < MAX_DIRS_IN_ROOT; i++){
+	for(int i = 0; i < root.nDirectories; i++){
 		if(strcmp(directoryName, root.directories[i].dname) == 0){
 			startBlock = root.directories[i].nStartBlock;
 			break;
@@ -506,7 +532,27 @@ void get_directory(csc452_directory_entry *directory, char *directoryName){
 }
 
 void get_file(char *directory, char * file, char *extension){
+    csc452_directory_entry entry;
+    get_directory(&entry, directory);
+    short fat[FAT_BLOCK_SIZE];
+    open_fat(fat);
+    
+    short fatIndex = -1; 
 
+    for(int i = 0; i < entry.nFiles; i++) {
+        if(strcmp(entry.files[i].fname, file) == 0 && 
+            strcmp(entry.files[i].fext, extension) == 0) {
+            fatIndex = (short) (entry.files[i].nStartBlock / BLOCKSIZE);
+            break;
+        }
+    }
+
+    while(true) {
+        if(fat[fatIndex] == -1) {
+            break;       
+        }
+        fatIndex = fat[fatIndex];
+    }
 }
 
 int check_directory(char *directory){
