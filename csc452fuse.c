@@ -321,24 +321,19 @@ static int csc452_write(const char *path, const char *buf, size_t size,
 	(void) fi;
 	(void) path;
 
+    int file_size = 0;
     char directory[MAX_FILENAME + 1];
 	char file[MAX_FILENAME + 1];
 	char extension[MAX_EXTENSION + 1];
     int fileOrDir = split_path(path, directory, file, extension);
 
-    if(check_directory(directory) = 1) {
-       size = -1; 
-    } 
-    else if(check_file(file) == -1) {
-        // DUNNO WHAT THE FUCK HAPPENS WHEN FILE DOESN'T EXIST
+    // Path exists and file exists 
+    if(check_directory(directory) == 1 && check_file(directory, file, extension) > 0) {
+        // DO SHIT
+
     }
-    else {    
+    //csc452_disk_block block;
         
-        
-        
-        csc452_disk_block block;
-        
-    }
 	
 
     //check to make sure path exists
@@ -574,7 +569,8 @@ int check_file(char *directory, char * file, char *extension){
 
 	if(check_directory(directory) == 0){
 		return flag;
-	} else {
+	} 
+    else {
 		csc452_directory_entry *entry = NULL;
 		get_directory(entry, directory);
 
