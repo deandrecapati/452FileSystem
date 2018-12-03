@@ -527,22 +527,35 @@ void get_directory(csc452_directory_entry *directory, char *directoryName){
 		fclose(file);
 	}
 } 
-char * get_file(char *directory, char * file, char *extension){
+
+// Will always check_file before calling get_file
+// Returns the Start Block of that file
+int get_file(char *directory, char * file, char *extension) {
     csc452_directory_entry entry;
     get_directory(&entry, directory);
-    short fat[FAT_BLOCK_SIZE];
-    open_fat(fat);
-    
-    short fatIndex = -1; 
-    int fsize = -1;
+
     for(int i = 0; i < entry.nFiles; i++) {
         if(strcmp(entry.files[i].fname, file) == 0 && 
             strcmp(entry.files[i].fext, extension) == 0) {
-            fatIndex = (short) (entry.files[i].nStartBlock / BLOCKSIZE);
-            fsize = (int) (entry.files[i].fsize);
-            break;
+            return entry.files[i].nStartBlock;
         }
     }
+    return -1;
+}
+
+// Will always check_file before calling get_file to call read_file
+// Returns a string of the entire file 
+char * read_file(char *directory, char * file, char *extension) {
+    int startBlock = 0; 
+    if((startBlock = get_file(directory, file, extension) == -1) {
+        return NULL;    
+    }
+
+    short fat[FAT_BLOCK_SIZE];
+    open_fat(fat);
+    
+    int fsize = check_file(directory, file, extension);
+    short fatIndex = get_file(directory, file, extension) / BLOCK_SIZE; 
    
     FILE * file = fopen(".disk", "r");
     char buf[fsize]; 
@@ -557,6 +570,8 @@ char * get_file(char *directory, char * file, char *extension){
     return buf;
 }
 
+// Checks if the directory exists inside the root
+// Return 0 if the directory does not exist, 1 if it exists
 int check_directory(char *directory){
 	int flag = 0;
 	csc452_root_directory root;
@@ -571,22 +586,25 @@ int check_directory(char *directory){
 	return flag;
 }
 
-int check_file(char *directory, char * file, char *extension){
+// Checks if the file exists inside a directory 
+// Returns -1 if the file does not exist, or the file's size if it do 
+int check_file(char *directory, char * file, char *extension) {
 	int flag = -1;
 
-	if(check_directory(directory) == 0){
+	if(check_directory(directory) == 0) {
 		return flag;
 	} 
     else {
 		csc452_directory_entry *entry = NULL;
 		get_directory(entry, directory);
 
-		for(int i = 0; i < entry->nFiles; i++){
-			if(strcmp(entry->files[i].fname, file) == 0){
-				if(entry->files[i].fext != NULL && strcmp(extension, entry->files[i].fext) == 0){
+		for(int i = 0; i < entry->nFiles; i++) {
+			if(strcmp(entry->files[i].fname, file) == 0) {
+				if(entry->files[i].fext != NULL && strcmp(extension, entry->files[i].fext) == 0) {
 					flag = entry->files[i].fsize;
 					break;
-				} else if(entry->files[i].fext == NULL && strcmp(extension, "\0") == 0){
+				} 
+                else if(entry->files[i].fext == NULL && strcmp(extension, "\0") == 0) {
 					flag = entry->files[i].fsize;
 					break;
 				}
