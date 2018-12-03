@@ -223,14 +223,10 @@ static int csc452_mkdir(const char *path, mode_t mode)
 	if(strlen(directory) > MAX_FILENAME){
 		return -ENAMETOOLONG;
 	}
-
-	if(type != 0){
+	else if(type != 0){
 		return -EPERM;
 	}
-
-	int flag = check_directory(directory);
-
-	if(flag != 0){
+	else if(check_directory(directory) != 0){
 		return -EEXIST;
 	}
 
@@ -334,10 +330,10 @@ static int csc452_mknod(const char *path, mode_t mode, dev_t dev)
 				fclose(file);
 				break;
 			} 
-			else if(i+1 == FAT_ENTRIES){
-				printf("The disk is full.\n");
-				res = -1;
-			}
+		}
+        if(i == FAT_ENTRIES) {
+			printf("The disk is full.\n");
+			res = -1;
 		}
 	}
 
@@ -370,149 +366,94 @@ static int csc452_read(const char *path, char *buf, size_t size, off_t offset,
  *
  */
 static int csc452_write(const char *path, const char *buf, size_t size,
-			  off_t offset, struct fuse_file_info *fi)
-{
+			  off_t offset, struct fuse_file_info *fi) {
 	(void) buf;
 	(void) offset;
 	(void) fi;
 	(void) path;
 
-    int file_size = 0;
     char directory[MAX_FILENAME + 1];
 	char file[MAX_FILENAME + 1];
 	char extension[MAX_EXTENSION + 1];
     int fileOrDir = split_path(path, directory, file, extension);
 
-    // Path exists and file exists 
-    if(check_directory(directory) == 1 && (file_size = check_file(directory, file, extension)) > 0) {
-        // DO SHIT
-		if(offset > size){
-			return -EFBIG;
-		}
-
-		short fat[FAT_ENTRIES];
-		open_fat(fat);
-
-		long fileStartBlock = get_file(directory, file, extension);
-		short fatEntry = fileStartBlock / BLOCK_SIZE;
-		FILE *disk = fopen(".disk", "r+b");
-
-		if(size <= BLOCK_SIZE){
-			short temp = fat[fatEntry];
-			fat[fatEntry] = -1;
-
-			while(temp != -1){
-				temp = fat[fatEntry];
-				fat[fatEntry] = 0;
-			}
-
-			csc452_disk_block block;
-			strcpy(block.data, buf);
-
-			//
-			// Get the directory and update the file entry in that directory
-			//
-
-			fseek(disk, fileStartBlock, SEEK_SET);
-			fwrite(buf, size, 1, disk);
-			fseek(disk, -FAT_BLOCK_SIZE, SEEK_END);
-			fwrite(&fat, FAT_BLOCK_SIZE, 1, disk);
-			
-		}
-		else{
-			long curPos = 0;
-			short fatPos = fatEntry;
-			csc452_disk_block block;
-
-			strncpy(block.data, buf, BLOCK_SIZE);
-			curPos += BLOCK_SIZE;
-
-			fseek(disk, fileStartBlock, SEEK_SET);
-			fwrite(buf, BLOCK_SIZE, 1, disk);
-
-			while(strlen(buf + curPos) > 512){
-				if(fat[fatPos] <= 0){
-					for(int i = 1; i < FAT_ENTRIES; i++){
-						if(fat[i] == 0){
-							fat[fatPos] = i;
-							fatPos = i;
-							break;
-						}
-					}
-				} 
-				else{
-					fatPos = fat[fatPos];
-				}
-				strncpy(block.data, buf + curPos, BLOCK_SIZE);
-				fseek(disk, BLOCK_SIZE * fatPos, SEEK_SET);
-				fwrite(buf, BLOCK_SIZE, 1, disk);
-				curPos += BLOCK_SIZE;
-			}
-
-			if(strlen(buf + curPos) > 0){
-				strncpy(block.data, buf + curPos, strlen(buf + curPos));
-
-				if(fat[fatPos] <= 0){
-					for(int i = 1; i < FAT_ENTRIES; i++){
-						if(fat[i] == 0){
-							fat[fatPos] = i;
-							fatPos = i;
-							break;
-						}
-					}
-				} 
-				else{
-					fatPos = fat[fatPos];
-				}
-
-				fseek(disk, BLOCK_SIZE * fatPos, SEEK_SET);
-				fwrite(buf, BLOCK_SIZE, 1, disk);
-			} 
-
-			if(fat[fatPos] != -1){
-				short nextFat = fat[fatPos];
-				fat[fatPos] = -1;
-				while(nextFat > 0){
-					short temp = fat[nextFat];
-					fat[nextFat] = 0;
-					nextFat = temp;
-				}
-			} 
-			else {
-				fat[fatPos] = -1;
-			}
-
-			//
-			// Update File Size in the directory entry
-			//
-
-			fseek(disk, -FAT_BLOCK_SIZE, SEEK_END);
-			fwrite(&fat, FAT_BLOCK_SIZE, 1, disk);
-		}
-
-		csc452_directory_entry entry;
-		long dirStart = get_directory(&entry, directory);
-
-		for(int i = 0; i < entry.nFiles; i++){
-			if(strcmp(entry.files[i].fname, file) == 0 && strcmp(entry.files[i].fext, extension) == 0){
-				entry.files[i].fsize = size;
-			}
-		}
-		fseek(disk, dirStart, SEEK_SET);
-		fwrite(&entry, sizeof(csc452_directory_entry), 1, disk);
-		fclose(disk);
+    if(offset > size) {
+        return -EFBIG;    
     }
-    //csc452_disk_block block;
+    else if(check_directory(directory) == 1 && check_file(directory, file, extension) > 0) {
+        long fileStart = get_file(directory, file, extension);
+        long fileStartIndex = fileStart / BLOCK_SIZE;
+        int offsetIndex = offset / BLOCK_SIZE;
+        int beginWriting = offset % BLOCK_SIZE;
+ 
+	    FILE *disk = fopen(".disk", "r+b");
+		csc452_disk_block block;
+        // Walk to the block where we want to modify
+        for(int i = 0; i < offsetIndex; i++) {
+            if(get_fat_val(fileStartIndex * BLOCK_SIZE) != -1) {
+                fileStartIndex = get_fat_val(fileStartIndex * BLOCKSIZE);
+            }
+        }
         
-	
-
-    //check to make sure path exists
-	//check that size is > 0
-	//check that offset is <= to the file size
-	//write data
-	//return success, or error
-
-	return size;
+        // Grab that block
+        fseek(disk, (fileStartIndex * BLOCK_SIZE), SEEK_SET); 
+        fread(&block, sizeof(csc452_disk_block), 1, disk);
+        
+        // When the size is smaller than the block        
+        if((strlen(block.data) + size) <= BLOCK_SIZE) {
+            // Need to add beginWriting to handle adding offset
+            strncpy(block.data + beginWriting, buf, size);
+            fseek(disk, fileStartIndex * BLOCK_SIZE, SEEK_SET);
+            fwrite(&block, sizeof(cs452_disk_block), 1, disk);
+        }
+        else {
+            // Need to add beginWriting to handle adding offset
+            strncpy(block.data + beginWriting, buf, (BLOCK_SIZE - beginWriting));
+            fseek(disk, fileStartIndex * BLOCK_SIZE, SEEK_SET);
+            fwrite(&block, sizeof(cs452_disk_block), 1, disk);
+            // Increment the buffer
+            buf += (BLOCK_SIZE) - beginWriting;
+            size = size - (BLOCK_SIZE - beginWriting);
+            
+            // As long as there are available blocks to use
+            while(get_fat_val(fileStartIndex * BLOCK_SIZE) != -1) {
+                fileStartIndex = get_fat_val(fileStartIndex * BLOCKSIZE);
+                fseek(disk, fileStartIndex * BLOCK_SIZE, SEEK_SET);
+                if(size > BLOCK_SIZE) {
+                    strncpy(block.data, buf, BLOCK_SIZE);
+                    fwrite(&block, sizeof(cs452_disk_block), 1, disk);
+                    buf += BLOCK_SIZE;
+                    size = size - BLOCK_SIZE;
+                }
+                else {
+                    strncpy(block.data, buf, size);
+                    fwrite(&block, sizeof(cs452_disk_block), 1, disk);
+                    size = 0; 
+                }
+            }
+            // More to write and need more blocks
+            while(size != 0) {
+                if(size > BLOCK_SIZE) {
+                    strncpy(block.data, buf, BLOCK_SIZE);
+                    long nextBlock = get_fat_block();
+                    fseek(disk, nextBlock, SEEK_SET);
+                    fwrite(&block, sizeof(cs452_disk_block), 1, disk);
+                    set_fat_block(nextBlock, -1);
+                    buf += BLOCK_SIZE;
+                    size = size - BLOCK_SIZE;
+                }
+                else {
+                    strncpy(block.data, buf, size);
+                    long nextBlock = get_fat_block();
+                    fseek(disk, nextBlock, SEEK_SET);
+                    fwrite(&block, sizeof(cs452_disk_block), 1, disk);
+                    set_fat_block(nextBlock, -1);
+                    buf += BLOCK_SIZE;
+                    size = size - BLOCK_SIZE;
+                }
+            } 
+        }
+    }
 }
 
 /*
