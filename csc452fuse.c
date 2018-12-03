@@ -330,7 +330,9 @@ static int csc452_write(const char *path, const char *buf, size_t size,
     // Path exists and file exists 
     if(check_directory(directory) == 1 && check_file(directory, file, extension) > 0) {
         // DO SHIT
+        while(size != 0) {
 
+        }
     }
     //csc452_disk_block block;
         
@@ -524,30 +526,35 @@ void get_directory(csc452_directory_entry *directory, char *directoryName){
 		fread(directory, sizeof(csc452_directory_entry), 1, file);
 		fclose(file);
 	}
-}
-
-void get_file(char *directory, char * file, char *extension){
+} 
+char * get_file(char *directory, char * file, char *extension){
     csc452_directory_entry entry;
     get_directory(&entry, directory);
     short fat[FAT_BLOCK_SIZE];
     open_fat(fat);
     
     short fatIndex = -1; 
-
+    int fsize = -1;
     for(int i = 0; i < entry.nFiles; i++) {
         if(strcmp(entry.files[i].fname, file) == 0 && 
             strcmp(entry.files[i].fext, extension) == 0) {
             fatIndex = (short) (entry.files[i].nStartBlock / BLOCKSIZE);
+            fsize = (int) (entry.files[i].fsize);
             break;
         }
     }
-
-    while(true) {
-        if(fat[fatIndex] == -1) {
-            break;       
-        }
-        fatIndex = fat[fatIndex];
+   
+    FILE * file = fopen(".disk", "r");
+    char buf[fsize]; 
+    
+    for(int i = 0; i < ((fsize / BLOCK_SIZE)) + 1; i++) {
+        fseek(file, BLOCK_SIZE * fatIndex, SEEK_SET);
+        fread(buf[i * BLOCK_SIZE], BLOCK_SIZE, 1, file);
+        fatIndex = fat[fatIndex]; 
     }
+   
+    fclose(file);  
+    return buf;
 }
 
 int check_directory(char *directory){
