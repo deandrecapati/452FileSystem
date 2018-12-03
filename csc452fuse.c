@@ -154,6 +154,14 @@ static int csc452_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	char extension[MAX_EXTENSION + 1];
     int fileOrDir = split_path(path, directory, file, extension);
 
+
+	printf("path: %s\n", path);
+	fflush(0);
+	printf("fileOrDir: %d checkDir: %d\n", fileOrDir, check_directory(directory));
+	fflush(0);
+
+
+
     if(strcmp(path, "/") == 0) {
 		filler(buf, ".", NULL,0);
 		filler(buf, "..", NULL, 0);
@@ -172,7 +180,12 @@ static int csc452_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
         csc452_directory_entry entry;
         get_directory(&entry, directory);
+		printf("read dir file coujnt: %d\n", entry.nFiles);
+		fflush(0);
         for(int i = 0; i < entry.nFiles; i++) {
+			printf("files: %s\n", entry.files[i].fname);
+			fflush(0);
+
             if(strcmp(entry.files[i].fname, "\0") != 0) {
                 if(strcmp(entry.files[i].fext, "\0") == 0) { 
                     filler(buf, entry.files[i].fname, NULL, 0);
@@ -308,7 +321,6 @@ static int csc452_mknod(const char *path, mode_t mode, dev_t dev)
 				//Update FAT table to mark the file location
 				fat[i] = -1;
 				//Create directory entry
-				FILE *newFile;
 				entry.files[entry.nFiles-1].nStartBlock = blockPos;
 				strcpy(entry.files[entry.nFiles-1].fname, file);
 				strcpy(entry.files[entry.nFiles-1].fext, extension);
@@ -317,8 +329,6 @@ static int csc452_mknod(const char *path, mode_t mode, dev_t dev)
 				FILE *file = fopen(".disk", "r+b");
 				fseek(file, directoryStart, SEEK_SET);
 				fwrite(&entry, sizeof(csc452_directory_entry), 1, file);
-				fseek(file, blockPos, SEEK_SET);
-				fwrite(&newFile, BLOCK_SIZE, 1, file);
 				fseek(file, -FAT_BLOCK_SIZE, SEEK_END);
 				fwrite(fat, FAT_BLOCK_SIZE, 1, file);
 				fclose(file);
@@ -753,8 +763,12 @@ int check_file(char *directory, char * file, char *extension){
 	else {
 		csc452_directory_entry entry;
 		get_directory(&entry, directory);
+		printf("files: %d\n", entry.nFiles);
+		fflush(0);
 		for(int i = 0; i < entry.nFiles; i++){
 			if(strcmp(entry.files[i].fname, file) == 0){
+				printf("entry file: %s\n", entry.files[i].fname);
+				fflush(0);
 				if(entry.files[i].fext != NULL && strcmp(extension, entry.files[i].fext) == 0){
 					flag = entry.files[i].fsize;
 					break;
@@ -783,20 +797,13 @@ void remove_directory(int pos, csc452_root_directory *root){
 }
 
 int split_path(const char *path, char *directory, char *file, char *extension){
-	sscanf(path, "/%[^/]/%[^.].%s", directory, file, extension);
+	int readIn = sscanf(path, "/%[^/]/%[^.].%s", directory, file, extension);
 	directory[MAX_FILENAME] = '\0';
 	file[MAX_FILENAME] = '\0';
 	extension[MAX_EXTENSION] = '\0';
 
 	int file_type = -1;
-
-	if(strcmp(directory, "\0") != 0){
-		file_type += 1;
-	}
-
-	if(strcmp(file, "\0") != 0){
-		file_type += 1;
-	}
+	file_type += readIn;
 
 	return file_type;
 }
