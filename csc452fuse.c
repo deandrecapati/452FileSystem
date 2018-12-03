@@ -90,7 +90,8 @@ int get_fat_block_count();
 //Prototypes
 void open_root(csc452_root_directory *root);
 void open_fat(short *fat_table);
-void get_file(char *directory, char * file, char *extension);
+int get_file(char *directory, char * file, char *extension);
+char * read_file(char *directory, char * file, char *extension);
 long get_directory(csc452_directory_entry *directory, char *directoryName);
 int check_directory(char *directory);
 int check_file(char *directory, char *file, char *extension);
@@ -687,28 +688,46 @@ long get_directory(csc452_directory_entry *directory, char *directoryName){
 	return startBlock;
 }
 
-void get_file(char *directory, char * file, char *extension){
+// Will always check_file before calling get_file
+// Returns the Start Block of that file
+int get_file(char *directory, char * file, char *extension) {
     csc452_directory_entry entry;
     get_directory(&entry, directory);
-    short fat[FAT_BLOCK_SIZE];
-    open_fat(fat);
-    
-    short fatIndex = -1; 
 
     for(int i = 0; i < entry.nFiles; i++) {
         if(strcmp(entry.files[i].fname, file) == 0 && 
             strcmp(entry.files[i].fext, extension) == 0) {
-            fatIndex = (short) (entry.files[i].nStartBlock / BLOCK_SIZE);
-            break;
+            return entry.files[i].nStartBlock;
         }
+    }
+    return -1;
+}
+
+// Will always check_file before calling get_file to call read_file
+// Returns a string of the entire file 
+char * read_file(char *directory, char * file, char *extension) {
+    int startBlock = 0; 
+    if((startBlock = get_file(directory, file, extension)) == -1) {
+        return NULL;    
     }
 
-    while(1) {
-        if(fat[fatIndex] == -1) {
-            break;       
-        }
-        fatIndex = fat[fatIndex];
+    short fat[FAT_BLOCK_SIZE];
+    open_fat(fat);
+    
+    int fsize = check_file(directory, file, extension);
+    short fatIndex = get_file(directory, file, extension) / BLOCK_SIZE; 
+   
+    FILE * disk = fopen(".disk", "r");
+    char *buf = calloc(1, fsize); 
+    
+    for(int i = 0; i < ((fsize / BLOCK_SIZE)) + 1; i++) {
+        fseek(disk, BLOCK_SIZE * fatIndex, SEEK_SET);
+        fread(buf + (i * BLOCK_SIZE), BLOCK_SIZE, 1, disk);
+        fatIndex = fat[fatIndex]; 
     }
+   
+    fclose(disk);  
+    return buf;
 }
 
 int check_directory(char *directory){
