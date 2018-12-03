@@ -90,7 +90,6 @@ int get_fat_block_count();
 //Prototypes
 void open_root(csc452_root_directory *root);
 void open_fat(short *fat_table);
-void get_directory(csc452_directory_entry *directory, char *directoryName);
 void get_file(char *directory, char * file, char *extension);
 int check_directory(char *directory);
 int check_file(char *directory, char *file, char *extension);
@@ -282,46 +281,40 @@ static int csc452_mknod(const char *path, mode_t mode, dev_t dev)
 	char extension[MAX_EXTENSION + 1] = "";
 	int res = 0;
 
+	split_path(path, directory, file, extension);
+
 	if(strcmp(path, "/") == 0){
 		res = -EPERM;
 	}
 	else if(strlen(file) > MAX_FILENAME){
 		res = -ENAMETOOLONG;
 	}
-	else if(check_file(directory, file, extension) > 0){
+	else if(check_file(directory, file, extension) >= 0){
 		res = -EEXIST;
 	}
 	else{
 		csc452_directory_entry entry;
 		short fat[FAT_ENTRIES];
-		get_directory(&entry, directory);
+		long directoryStart = get_directory(&entry, directory);
 		open_fat(fat);
-
 		long blockPos = BLOCK_SIZE;
-		printf("Incrementing nFIles\n");
-		fflush(0);
 		entry.nFiles += 1;
-		printf("nFiles icremented\n");
-		fflush(0);
 
 		for(int i = 1; i < FAT_ENTRIES; i++){
 			blockPos *= i;
-			printf("block: %d\n", blockPos);
-			fflush(0);
-			printf("fat: %d", fat[i]);
-			fflush(0);
 			if(fat[i] == 0){
 				//Update FAT table to mark the file location
 				fat[i] = -1;
 				//Create directory entry
-				printf("creating new file...\n");
-				fflush(0);
 				FILE *newFile;
 				entry.files[entry.nFiles-1].nStartBlock = blockPos;
 				strcpy(entry.files[entry.nFiles-1].fname, file);
-				
+				strcpy(entry.files[entry.nFiles-1].fext, extension);
+
 				//Update disk
 				FILE *file = fopen(".disk", "r+b");
+				fseek(file, directoryStart, SEEK_SET);
+				fwrite(&entry, sizeof(csc452_directory_entry), 1, file);
 				fseek(file, blockPos, SEEK_SET);
 				fwrite(&newFile, BLOCK_SIZE, 1, file);
 				fseek(file, -FAT_BLOCK_SIZE, SEEK_END);
@@ -414,8 +407,6 @@ static int csc452_rmdir(const char *path)
 		short fat[FAT_ENTRIES];
 		open_root(&root);
 		open_fat(fat);
-		printf("number of directories: %d\n", root.nDirectories);
-		fflush(0);
 		for(int i = 0; i < root.nDirectories; i++){
 			if(strcmp(directory, root.directories[i].dname) == 0){
 				fat[root.directories[i].nStartBlock/BLOCK_SIZE] = 0;
@@ -545,12 +536,12 @@ void open_fat(short *fat_table){
 	}
 }
 
-void get_directory(csc452_directory_entry *directory, char *directoryName){
+long get_directory(csc452_directory_entry *directory, char *directoryName){
 	long startBlock = 0;
 	csc452_root_directory root;
 	open_root(&root);
 
-	for(int i = 0; i < MAX_DIRS_IN_ROOT; i++){
+	for(int i = 0; i < root.nDirectories; i++){
 		if(strcmp(directoryName, root.directories[i].dname) == 0){
 			startBlock = root.directories[i].nStartBlock;
 			break;
@@ -563,6 +554,7 @@ void get_directory(csc452_directory_entry *directory, char *directoryName){
 		fread(directory, sizeof(csc452_directory_entry), 1, file);
 		fclose(file);
 	}
+	return startBlock;
 }
 
 void get_file(char *directory, char * file, char *extension){
@@ -592,7 +584,6 @@ int check_file(char *directory, char * file, char *extension){
 	else {
 		csc452_directory_entry entry;
 		get_directory(&entry, directory);
-
 		for(int i = 0; i < entry.nFiles; i++){
 			if(strcmp(entry.files[i].fname, file) == 0){
 				if(entry.files[i].fext != NULL && strcmp(extension, entry.files[i].fext) == 0){
