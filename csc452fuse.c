@@ -83,6 +83,7 @@ typedef struct csc452_disk_block csc452_disk_block;
 
 int get_fat_block_count();
 
+// Fat Table Information 
 #define FAT_BLOCK_COUNT get_fat_block_count()
 #define FAT_BLOCK_SIZE (FAT_BLOCK_COUNT * BLOCK_SIZE)
 #define FAT_ENTRIES ((FAT_BLOCK_SIZE / sizeof(short)) - FAT_BLOCK_COUNT)
@@ -114,21 +115,24 @@ static int csc452_getattr(const char *path, struct stat *stbuf)
     int fsize = -1;
 
 	int file_type = split_path(path, directory, file, extension);
+    // Path is just the root
 	if (strcmp(path, "/") == 0) {
 		stbuf->st_mode = S_IFDIR | 0755;
 		stbuf->st_nlink = 2;
-	} 
+	}
+    // Path has a valid directory 
 	else if(file_type == 0 && check_directory(directory == 1)) {
 		stbuf->st_mode = S_IFDIR | 0755;
 		stbuf->st_nlink = 2;
 	}
+    // Path has a valid file 
 	else if(file_type == 1 && (fsize = check_file(directory, file, extension)) != -1) {
 		stbuf->st_mode = S_IFREG | 0666;
 		stbuf->st_nlink = 2;
 		stbuf->st_size = fsize;
 	} 
+    // Else return that path doesn't exist
 	else {
-		//Else return that path doesn't exist
 		res = -ENOENT;
 	}
 	return res;
@@ -153,29 +157,35 @@ static int csc452_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	char extension[MAX_EXTENSION + 1];
     int fileOrDir = split_path(path, directory, file, extension);
 
+    // Path is just the root
     if(strcmp(path, "/") == 0) {
 		filler(buf, ".", NULL,0);
 		filler(buf, "..", NULL, 0);
         
 		csc452_root_directory root;
 		open_root(&root);
+        // Add all the directories in the root
         for(int i = 0; i < root.nDirectories; i++) {
             if(strcmp(root.directories[i].dname, "\0") != 0) {
                 filler(buf, root.directories[i].dname, NULL, 0);
             }
         }
     }
+    // Path is just a directory
     else if(fileOrDir == 0 && check_directory(directory) == 1) {
 		filler(buf, ".", NULL,0);
 		filler(buf, "..", NULL, 0);
 
         csc452_directory_entry entry;
         get_directory(&entry, directory);
+        // Add all files in the directory
         for(int i = 0; i < entry.nFiles; i++) {
             if(strcmp(entry.files[i].fname, "\0") != 0) {
+                // No extension 
                 if(strcmp(entry.files[i].fext, "\0") == 0) { 
                     filler(buf, entry.files[i].fname, NULL, 0);
                 }
+                // With extension
                 else {
                     char fullFileName[MAX_FILENAME + MAX_EXTENSION + 2];
                     strcpy(fullFileName, entry.files[i].fname);
@@ -186,6 +196,7 @@ static int csc452_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
              }
         }
     }
+    // Path invalid
     else {
         return -ENOENT;
     }
@@ -200,17 +211,17 @@ static int csc452_mkdir(const char *path, mode_t mode)
 {
 	(void) path;
 	(void) mode;
+
 	char directory[MAX_FILENAME + 1] = "";
 	char file[MAX_FILENAME + 1] = "";
 	char extension[MAX_EXTENSION + 1] = "";
 	int res = 0;
 	int type = split_path(path, directory, file, extension);
 
-	if(strlen(directory) > MAX_FILENAME){
+	if(strlen(directory) > MAX_FILENAME) {
 		return -ENAMETOOLONG;
 	}
-
-	if(type != 0){
+	if(type != 0) {
 		return -EPERM;
 	}
 
