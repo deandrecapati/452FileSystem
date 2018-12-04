@@ -289,6 +289,7 @@ static int csc452_mknod(const char *path, mode_t mode, dev_t dev)
 		entry.files[entry.nFiles-1].nStartBlock = blockPos;
 		strcpy(entry.files[entry.nFiles-1].fname, file);
 		strcpy(entry.files[entry.nFiles-1].fext, extension);
+		entry.files[entry.nFiles-1].fsize = 0;
 
 		//Update disk
 		FILE *file = fopen(".disk", "r+b");
@@ -336,11 +337,16 @@ static int csc452_write(const char *path, const char *buf, size_t size,
 	char file[MAX_FILENAME + 1];
 	char extension[MAX_EXTENSION + 1];
     int fileOrDir = split_path(path, directory, file, extension);
+	size_t res = size;
+
+	int var = check_file(directory, file, extension);
 
     if(offset > size) {
         return -EFBIG;    
     }
-    else if(check_directory(directory) == 1 && check_file(directory, file, extension) > 0) {
+    else if(check_directory(directory) == 1 && check_file(directory, file, extension) >= 0) {
+		printf("Is directory && file exists\n");
+		fflush(0);
         long fileStart = get_file(directory, file, extension);
         long fileStartIndex = fileStart / BLOCK_SIZE;
         int offsetIndex = offset / BLOCK_SIZE;
@@ -351,7 +357,7 @@ static int csc452_write(const char *path, const char *buf, size_t size,
         // Walk to the block where we want to modify
         for(int i = 0; i < offsetIndex; i++) {
             if(get_fat_val(fileStartIndex * BLOCK_SIZE) != -1) {
-                fileStartIndex = get_fat_val(fileStartIndex * BLOCKSIZE);
+                fileStartIndex = get_fat_val(fileStartIndex * BLOCK_SIZE);
             }
         }
         
@@ -359,35 +365,38 @@ static int csc452_write(const char *path, const char *buf, size_t size,
         fseek(disk, (fileStartIndex * BLOCK_SIZE), SEEK_SET); 
         fread(&block, sizeof(csc452_disk_block), 1, disk);
         
+		printf("moving to file start, %ld, position: %ld\n", fileStart,fileStartIndex * BLOCK_SIZE);
+		fflush(0);
+
         // When the size is smaller than the block        
         if((strlen(block.data) + size) <= BLOCK_SIZE) {
             // Need to add beginWriting to handle adding offset
             strncpy(block.data + beginWriting, buf, size);
             fseek(disk, fileStartIndex * BLOCK_SIZE, SEEK_SET);
-            fwrite(&block, sizeof(cs452_disk_block), 1, disk);
+            fwrite(&block, sizeof(csc452_disk_block), 1, disk);
         }
         else {
             // Need to add beginWriting to handle adding offset
             strncpy(block.data + beginWriting, buf, (BLOCK_SIZE - beginWriting));
             fseek(disk, fileStartIndex * BLOCK_SIZE, SEEK_SET);
-            fwrite(&block, sizeof(cs452_disk_block), 1, disk);
+            fwrite(&block, sizeof(csc452_disk_block), 1, disk);
             // Increment the buffer
             buf += (BLOCK_SIZE) - beginWriting;
             size = size - (BLOCK_SIZE - beginWriting);
             
             // As long as there are available blocks to use
             while(get_fat_val(fileStartIndex * BLOCK_SIZE) != -1) {
-                fileStartIndex = get_fat_val(fileStartIndex * BLOCKSIZE);
+                fileStartIndex = get_fat_val(fileStartIndex * BLOCK_SIZE);
                 fseek(disk, fileStartIndex * BLOCK_SIZE, SEEK_SET);
                 if(size > BLOCK_SIZE) {
                     strncpy(block.data, buf, BLOCK_SIZE);
-                    fwrite(&block, sizeof(cs452_disk_block), 1, disk);
+                    fwrite(&block, sizeof(csc452_disk_block), 1, disk);
                     buf += BLOCK_SIZE;
                     size = size - BLOCK_SIZE;
                 }
                 else {
                     strncpy(block.data, buf, size);
-                    fwrite(&block, sizeof(cs452_disk_block), 1, disk);
+                    fwrite(&block, sizeof(csc452_disk_block), 1, disk);
                     size = 0; 
                 }
             }
@@ -397,7 +406,7 @@ static int csc452_write(const char *path, const char *buf, size_t size,
                     strncpy(block.data, buf, BLOCK_SIZE);
                     long nextBlock = get_fat_block();
                     fseek(disk, nextBlock, SEEK_SET);
-                    fwrite(&block, sizeof(cs452_disk_block), 1, disk);
+                    fwrite(&block, sizeof(csc452_disk_block), 1, disk);
                     set_fat_block(nextBlock, -1);
                     buf += BLOCK_SIZE;
                     size = size - BLOCK_SIZE;
@@ -406,7 +415,7 @@ static int csc452_write(const char *path, const char *buf, size_t size,
                     strncpy(block.data, buf, size);
                     long nextBlock = get_fat_block();
                     fseek(disk, nextBlock, SEEK_SET);
-                    fwrite(&block, sizeof(cs452_disk_block), 1, disk);
+                    fwrite(&block, sizeof(csc452_disk_block), 1, disk);
                     set_fat_block(nextBlock, -1);
                     buf += BLOCK_SIZE;
                     size = size - BLOCK_SIZE;
@@ -414,6 +423,7 @@ static int csc452_write(const char *path, const char *buf, size_t size,
             } 
         }
     }
+	return res;
 }
 
 /*
@@ -661,19 +671,12 @@ int check_file(char *directory, char * file, char *extension){
 		csc452_directory_entry entry;
 		get_directory(&entry, directory);
 		for(int i = 0; i < entry.nFiles; i++){
-			if(strcmp(entry.files[i].fname, file) == 0){
-				if(entry.files[i].fext != NULL && strcmp(extension, entry.files[i].fext) == 0){
-					flag = entry.files[i].fsize;
-					break;
-				} 
-				else if(entry.files[i].fext == NULL && strcmp(extension, "\0") == 0){
-					flag = entry.files[i].fsize;
-					break;
-				}
+			if(strcmp(entry.files[i].fname, file) == 0 && strcmp(extension, entry.files[i].fext) == 0){
+				flag = entry.files[i].fsize;
+				break;
 			}
 		}
 	}
-
 	return flag;
 }
 
