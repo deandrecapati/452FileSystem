@@ -80,9 +80,6 @@ struct csc452_disk_block
 
 typedef struct csc452_disk_block csc452_disk_block;
 
-
-int get_fat_block_count();
-
 #define FAT_BLOCK_COUNT 40
 #define FAT_BLOCK_SIZE (FAT_BLOCK_COUNT * BLOCK_SIZE)
 #define FAT_ENTRIES ((FAT_BLOCK_SIZE / sizeof(short)) - FAT_BLOCK_COUNT)
@@ -702,19 +699,6 @@ int split_path(const char *path, char *directory, char *file, char *extension){
 	file_type += readIn;
 
 	return file_type;
-}
-
-int get_fat_block_count(){
-	FILE *file = fopen(".disk", "r+b");
-	int size = 0;
-	if(file != NULL){
-		fseek(file, 0, SEEK_END);
-		size = ftell(file);
-		fclose(file);
-	}
-
-	size = ((size/BLOCK_SIZE) * sizeof(short))/BLOCK_SIZE;
-	return size;
 }
 
 long get_fat_block(){
