@@ -97,6 +97,9 @@ int check_directory(char *directory);
 int check_file(char *directory, char *file, char *extension);
 int split_path(const char *path, char *directory, char *filename, char *extension);
 void remove_directory(int pos, csc452_root_directory *root);
+void set_fat_block(long blockAddr, short val);
+long get_fat_block();
+short get_fat_val(long blockAddr);
 
 
 /*
@@ -154,14 +157,6 @@ static int csc452_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	char extension[MAX_EXTENSION + 1];
     int fileOrDir = split_path(path, directory, file, extension);
 
-
-	printf("path: %s\n", path);
-	fflush(0);
-	printf("fileOrDir: %d checkDir: %d\n", fileOrDir, check_directory(directory));
-	fflush(0);
-
-
-
     if(strcmp(path, "/") == 0) {
 		filler(buf, ".", NULL,0);
 		filler(buf, "..", NULL, 0);
@@ -180,12 +175,7 @@ static int csc452_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
         csc452_directory_entry entry;
         get_directory(&entry, directory);
-		printf("read dir file coujnt: %d\n", entry.nFiles);
-		fflush(0);
         for(int i = 0; i < entry.nFiles; i++) {
-			printf("files: %s\n", entry.files[i].fname);
-			fflush(0);
-
             if(strcmp(entry.files[i].fname, "\0") != 0) {
                 if(strcmp(entry.files[i].fext, "\0") == 0) { 
                     filler(buf, entry.files[i].fname, NULL, 0);
@@ -235,45 +225,32 @@ static int csc452_mkdir(const char *path, mode_t mode)
 	}
 
 	csc452_root_directory root;
-	short fat[FAT_ENTRIES];
 	open_root(&root);
-	open_fat(fat);
 
 	if(root.nDirectories >= MAX_DIRS_IN_ROOT){
 		printf("The directory could not be created, you have reached the maximum directories allowed in the root.\n");
 		return -1;
 	}
 
-	long blockPos = BLOCK_SIZE;
 	root.nDirectories += 1;
+	long blockPos = get_fat_block();
 
-	for(int i = 1; i < FAT_ENTRIES; i++){
-		blockPos *= i;
-		if(fat[i] == 0){
-			//Update FAT table to mark the directory
-			fat[i] = -1;
-			//Create directory entry
-			csc452_directory_entry newDir;
-			newDir.nFiles = 0;
-			FILE *file = fopen(".disk", "r+b");
-			strcpy(root.directories[root.nDirectories-1].dname, directory);
-			root.directories[root.nDirectories-1].nStartBlock = blockPos;
+	//Update FAT table to mark the directory
+	set_fat_block(blockPos, -1);
+	//Create directory entry
+	csc452_directory_entry newDir;
+	newDir.nFiles = 0;
+	FILE *disk = fopen(".disk", "r+b");
+	strcpy(root.directories[root.nDirectories-1].dname, directory);
+	root.directories[root.nDirectories-1].nStartBlock = blockPos;
 
-			//Update disk
-			fseek(file, 0, SEEK_SET);
-			fwrite(&root, BLOCK_SIZE, 1, file);
-			fseek(file, blockPos, SEEK_SET);
-			fwrite(&newDir, BLOCK_SIZE, 1, file);
-			fseek(file, -FAT_BLOCK_SIZE, SEEK_END);
-			fwrite(fat, FAT_BLOCK_SIZE, 1, file);
-			fclose(file);
-			break;
-		} 
-		else if(i+1 == FAT_ENTRIES){
-			printf("The disk is full.\n");
-			res = -1;
-		}
-	}
+	//Update disk
+	fseek(disk, 0, SEEK_SET);
+	fwrite(&root, BLOCK_SIZE, 1, disk);
+	fseek(disk, blockPos, SEEK_SET);
+	fwrite(&newDir, BLOCK_SIZE, 1, disk);
+	fclose(disk);
+	
 	return res;
 }
 
@@ -309,36 +286,22 @@ static int csc452_mknod(const char *path, mode_t mode, dev_t dev)
 	}
 	else{
 		csc452_directory_entry entry;
-		short fat[FAT_ENTRIES];
 		long directoryStart = get_directory(&entry, directory);
-		open_fat(fat);
-		long blockPos = BLOCK_SIZE;
+		long blockPos = get_fat_block();
 		entry.nFiles += 1;
 
-		for(int i = 1; i < FAT_ENTRIES; i++){
-			blockPos *= i;
-			if(fat[i] == 0){
-				//Update FAT table to mark the file location
-				fat[i] = -1;
-				//Create directory entry
-				entry.files[entry.nFiles-1].nStartBlock = blockPos;
-				strcpy(entry.files[entry.nFiles-1].fname, file);
-				strcpy(entry.files[entry.nFiles-1].fext, extension);
+		//Update FAT table to mark the file location
+		set_fat_block(blockPos, -1);
+		//Create directory entry
+		entry.files[entry.nFiles-1].nStartBlock = blockPos;
+		strcpy(entry.files[entry.nFiles-1].fname, file);
+		strcpy(entry.files[entry.nFiles-1].fext, extension);
 
-				//Update disk
-				FILE *file = fopen(".disk", "r+b");
-				fseek(file, directoryStart, SEEK_SET);
-				fwrite(&entry, sizeof(csc452_directory_entry), 1, file);
-				fseek(file, -FAT_BLOCK_SIZE, SEEK_END);
-				fwrite(fat, FAT_BLOCK_SIZE, 1, file);
-				fclose(file);
-				break;
-			} 
-			else if(i+1 == FAT_ENTRIES){
-				printf("The disk is full.\n");
-				res = -1;
-			}
-		}
+		//Update disk
+		FILE *file = fopen(".disk", "r+b");
+		fseek(file, directoryStart, SEEK_SET);
+		fwrite(&entry, sizeof(csc452_directory_entry), 1, file);
+		fclose(file);
 	}
 
 	return res;
@@ -545,19 +508,15 @@ static int csc452_rmdir(const char *path)
 		res = -ENOTEMPTY;
 	} else{
 		csc452_root_directory root;
-		short fat[FAT_ENTRIES];
 		open_root(&root);
-		open_fat(fat);
 		for(int i = 0; i < root.nDirectories; i++){
 			if(strcmp(directory, root.directories[i].dname) == 0){
-				fat[root.directories[i].nStartBlock/BLOCK_SIZE] = 0;
 				remove_directory(i, &root);
+				set_fat_block(root.directories[i].nStartBlock, 0);
 				//Update disk
 				FILE *file = fopen(".disk", "r+b");
 				fseek(file, 0, SEEK_SET);
 				fwrite(&root, BLOCK_SIZE, 1, file);
-				fseek(file, -FAT_BLOCK_SIZE, SEEK_END);
-				fwrite(fat, FAT_BLOCK_SIZE, 1, file);
 				fclose(file);
 				break;
 			}
@@ -763,12 +722,8 @@ int check_file(char *directory, char * file, char *extension){
 	else {
 		csc452_directory_entry entry;
 		get_directory(&entry, directory);
-		printf("files: %d\n", entry.nFiles);
-		fflush(0);
 		for(int i = 0; i < entry.nFiles; i++){
 			if(strcmp(entry.files[i].fname, file) == 0){
-				printf("entry file: %s\n", entry.files[i].fname);
-				fflush(0);
 				if(entry.files[i].fext != NULL && strcmp(extension, entry.files[i].fext) == 0){
 					flag = entry.files[i].fsize;
 					break;
@@ -819,6 +774,39 @@ int get_fat_block_count(){
 
 	size = ((size/BLOCK_SIZE) * sizeof(short))/BLOCK_SIZE;
 	return size;
+}
+
+long get_fat_block(){
+	FILE *disk = fopen(".disk", "r+b");
+	short fat_val;
+	fseek(disk, ((-FAT_BLOCK_SIZE) + sizeof(short)), SEEK_END);
+	fread(&fat_val, sizeof(short), 1, disk);
+	for(int i = 1; i < FAT_ENTRIES; i++){
+		if(fat_val == 0){
+			return i * 512;
+		}
+		fread(&fat_val, sizeof(short), 1, disk);
+	}
+	fclose(disk);
+	return -1;
+}
+
+void set_fat_block(long blockAddr, short val){
+	FILE *disk = fopen(".disk", "r+b");
+	short fat_entry = blockAddr / BLOCK_SIZE;
+	fseek(disk, (-FAT_BLOCK_SIZE + ((sizeof(short) * fat_entry))), SEEK_END);
+	fwrite(&val, sizeof(short), 1, disk);
+	fclose(disk);
+}
+
+short get_fat_val(long blockAddr){
+	FILE *disk = fopen(".disk", "r+b");
+	short fat_entry = blockAddr / BLOCK_SIZE;
+	short res = 0;
+	fseek(disk, (-FAT_BLOCK_SIZE + ((sizeof(short) * fat_entry))), SEEK_END);
+	fread(&res, sizeof(short), 1, disk);
+	fclose(disk);
+	return res;
 }
 
 //Don't change this.
