@@ -357,6 +357,7 @@ static int csc452_write(const char *path, const char *buf, size_t size,
     int fileOrDir = split_path(path, directory, file, extension);
 	size_t res = size;
 	size_t fileSize = 0;
+
     if(offset > (fileSize = check_file(directory, file, extension))) {
         return -EFBIG;    
     }
@@ -393,11 +394,14 @@ static int csc452_write(const char *path, const char *buf, size_t size,
             strncpy(block.data + beginWriting, buf, (BLOCK_SIZE - beginWriting));
             fseek(disk, fileStartIndex * BLOCK_SIZE, SEEK_SET);
             fwrite(&block, sizeof(csc452_disk_block), 1, disk);
+			printf("block written...\n");
+			fflush(0);
             // Increment the buffer
             buf += (BLOCK_SIZE) - beginWriting;
             size = size - (BLOCK_SIZE - beginWriting);
             
             // As long as there are available blocks to use
+
             while(get_fat_val(fileStartIndex * BLOCK_SIZE) != -1) {
                 fileStartIndex = get_fat_val(fileStartIndex * BLOCK_SIZE);
                 fseek(disk, fileStartIndex * BLOCK_SIZE, SEEK_SET);
@@ -415,7 +419,7 @@ static int csc452_write(const char *path, const char *buf, size_t size,
             }
             // More to write and need more blocks
 			long prevBlock = 0;
-            while(size != 0) {
+            while(size > 0) {
                 if(size > BLOCK_SIZE) {
                     strncpy(block.data, buf, BLOCK_SIZE);
                     long nextBlock = get_fat_block();
@@ -440,7 +444,7 @@ static int csc452_write(const char *path, const char *buf, size_t size,
                     fwrite(&block, sizeof(csc452_disk_block), 1, disk);
                     set_fat_block(nextBlock, -1);
                     buf += BLOCK_SIZE;
-                    size = size - BLOCK_SIZE;
+                    break;
                 }
             } 
         }
