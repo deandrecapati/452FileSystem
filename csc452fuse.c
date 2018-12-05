@@ -88,7 +88,6 @@ typedef struct csc452_disk_block csc452_disk_block;
 void open_root(csc452_root_directory *root);
 void open_fat(short *fat_table);
 int get_file(char *directory, char * file, char *extension);
-char * read_file(char *directory, char * file, char *extension);
 long get_directory(csc452_directory_entry *directory, char *directoryName);
 int check_directory(char *directory);
 int check_file(char *directory, char *file, char *extension);
@@ -326,12 +325,37 @@ static int csc452_read(const char *path, char *buf, size_t size, off_t offset,
 
 	split_path(path, directory, file, extension);
 
-	if(check_file(directory, file, extension) <= 0){
+	if(check_directory(directory) == 0 || check_file(directory, file, extension) <= 0){
 		return -ENOENT;
 	}
 
+	if(offset > size){
+		return -EFBIG;
+	}
 
-
+	int startBlock = 0; 
+    if((startBlock = get_file(directory, file, extension)) == -1) {
+        return NULL;    
+    }
+    
+    int fsize = check_file(directory, file, extension);
+    short fatIndex = get_file(directory, file, extension) / BLOCK_SIZE; 
+   
+    FILE * disk = fopen(".disk", "r");
+    
+    for(int i = 0; i < ((fsize / BLOCK_SIZE)) + 1; i++) {
+		printf("looping over block\n");
+		fflush(0);
+        fseek(disk, BLOCK_SIZE * fatIndex, SEEK_SET);
+        fread(buf + (i * BLOCK_SIZE), BLOCK_SIZE, 1, disk);
+		printf("buffer read. \n");
+		fflush(0);
+        fatIndex = get_fat_val(fatIndex); 
+    }
+   
+    fclose(disk); 
+	printf("returning buf %s\n", buf);
+	fflush(0); 
 	//check to make sure path exists
 	//check that size is > 0
 	//check that offset is <= to the file size
@@ -644,30 +668,6 @@ int get_file(char *directory, char * file, char *extension) {
         }
     }
     return -1;
-}
-
-// Will always check_file before calling get_file to call read_file
-// Returns a string of the entire file 
-char * read_file(char *directory, char * file, char *extension) {
-    int startBlock = 0; 
-    if((startBlock = get_file(directory, file, extension)) == -1) {
-        return NULL;    
-    }
-    
-    int fsize = check_file(directory, file, extension);
-    short fatIndex = get_file(directory, file, extension) / BLOCK_SIZE; 
-   
-    FILE * disk = fopen(".disk", "r");
-    char *buf = calloc(1, fsize); 
-    
-    for(int i = 0; i < ((fsize / BLOCK_SIZE)) + 1; i++) {
-        fseek(disk, BLOCK_SIZE * fatIndex, SEEK_SET);
-        fread(buf + (i * BLOCK_SIZE), BLOCK_SIZE, 1, disk);
-        fatIndex = get_fat_val(fatIndex); 
-    }
-   
-    fclose(disk);  
-    return buf;
 }
 
 int check_directory(char *directory){
