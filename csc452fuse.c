@@ -93,6 +93,7 @@ int check_directory(char *directory);
 int check_file(char *directory, char *file, char *extension);
 int split_path(const char *path, char *directory, char *filename, char *extension);
 void remove_directory(int pos, csc452_root_directory *root);
+void remove_file(int pos, csc452_directory_entry *entry);
 void set_fat_block(long blockAddr, short val);
 long get_fat_block();
 short get_fat_val(long blockAddr);
@@ -337,7 +338,6 @@ static int csc452_read(const char *path, char *buf, size_t size, off_t offset,
 	char directory[MAX_FILENAME + 1] = "";
 	char file[MAX_FILENAME + 1] = "";
 	char extension[MAX_EXTENSION + 1] = "";
-	int res = 0;
 
 	split_path(path, directory, file, extension);
 
@@ -348,11 +348,6 @@ static int csc452_read(const char *path, char *buf, size_t size, off_t offset,
 	if(offset > size){
 		return -EFBIG;
 	}
-
-	int startBlock = 0; 
-    if((startBlock = get_file(directory, file, extension)) == -1) {
-        return NULL;    
-    }
     
     int fsize = check_file(directory, file, extension);
     short fatIndex = get_file(directory, file, extension) / BLOCK_SIZE; 
@@ -360,18 +355,12 @@ static int csc452_read(const char *path, char *buf, size_t size, off_t offset,
     FILE * disk = fopen(".disk", "r");
     
     for(int i = 0; i < ((fsize / BLOCK_SIZE)) + 1; i++) {
-		printf("looping over block\n");
-		fflush(0);
         fseek(disk, BLOCK_SIZE * fatIndex, SEEK_SET);
         fread(buf + (i * BLOCK_SIZE), BLOCK_SIZE, 1, disk);
-		printf("buffer read. \n");
-		fflush(0);
         fatIndex = get_fat_val(fatIndex); 
     }
    
     fclose(disk); 
-	printf("returning buf %s\n", buf);
-	fflush(0); 
 	//check to make sure path exists
 	//check that size is > 0
 	//check that offset is <= to the file size
@@ -396,7 +385,7 @@ static int csc452_write(const char *path, const char *buf, size_t size,
     char directory[MAX_FILENAME + 1];
 	char file[MAX_FILENAME + 1];
 	char extension[MAX_EXTENSION + 1];
-    int fileOrDir = split_path(path, directory, file, extension);
+    split_path(path, directory, file, extension);
 	size_t res = size;
 	size_t fileSize = 0;
     
@@ -439,8 +428,6 @@ static int csc452_write(const char *path, const char *buf, size_t size,
             strncpy(block.data + beginWriting, buf, (BLOCK_SIZE - beginWriting));
             fseek(disk, fileStartIndex * BLOCK_SIZE, SEEK_SET);
             fwrite(&block, sizeof(csc452_disk_block), 1, disk);
-			printf("block written...\n");
-			fflush(0);
             // Increment the buffer
             buf += (BLOCK_SIZE) - beginWriting;
             size = size - (BLOCK_SIZE - beginWriting);
@@ -513,7 +500,7 @@ static int csc452_rmdir(const char *path)
 	char extension[MAX_EXTENSION + 1] = "";
 	int res = 0;
 
-	int file_type = split_path(path, directory, file, extension);
+	split_path(path, directory, file, extension);
 
     // Error checks
 	if(strcmp(file, "\0") != 0) { 
@@ -558,6 +545,68 @@ static int csc452_rmdir(const char *path)
 static int csc452_unlink(const char *path)
 {
         (void) path;
+
+		// creates variables for path
+		char directory[MAX_FILENAME + 1] = "";
+		char file[MAX_FILENAME + 1] = "";
+		char extension[MAX_EXTENSION + 1] = "";
+
+		// parse path name and gets the file_type as a result
+		int file_type = split_path(path, directory, file, extension);
+
+		// If the file type is < 1 return not a dir error
+		if(file_type < 1){
+			return -EISDIR;
+		}
+
+		// If the file doesn't exist return -ENOENT
+		if(check_file(directory, file, extension) < 0){
+			return -ENOENT;
+		}
+
+		// Initialize the entry to update and get the start blocks for the directory and file
+		csc452_directory_entry entry;
+		long dirStartBlock = get_directory(&entry, directory);
+		long fileStartBlock = 0;
+
+		// Loop over the files in the directory and find the matching one to delete
+		for(int i = 0; i < entry.nFiles; i++){
+			if(strcmp(entry.files[i].fname, file) == 0 && strcmp(extension, entry.files[i].fext) == 0){
+				// if it matches set the start block to the file in the entry
+				fileStartBlock = entry.files[i].nStartBlock;
+
+				// remove the files from the entry
+				remove_file(i, &entry);
+
+				// get the index in the fat tabkle
+				short fat_index = get_fat_val(fileStartBlock);
+
+				// if the fat index is -1 set the single entry to 0
+				if(fat_index == -1){
+					set_fat_block(fileStartBlock, 0);
+				} 
+				else{
+					// if the index isn't -1 loop through the links in the fat table and set them all to 0
+					while(1){
+						short nextIndex = get_fat_val((fat_index * BLOCK_SIZE));
+						set_fat_block((fat_index), 0);
+						fat_index = nextIndex;
+						if(fat_index == -1){
+							set_fat_block((fat_index * BLOCK_SIZE), 0);
+						}
+					}
+				}
+
+				// Open the disk and write the updated directory entry to its original spot
+				FILE *file = fopen(".disk", "r+b");
+				fseek(file, dirStartBlock, SEEK_SET);
+				fwrite(&entry, sizeof(csc452_directory_entry), 1, file);
+				fclose(file);
+				break;
+			}
+		}
+
+		// return success
         return 0;
 }
 
@@ -738,6 +787,20 @@ void remove_directory(int pos, csc452_root_directory *root){
 		root->directories[pos] = root->directories[root->nDirectories-1];
 		strcpy(root->directories[root->nDirectories-1].dname, "\0");
 		root->nDirectories -=1;
+	}
+}
+
+void remove_file(int pos, csc452_directory_entry *entry){
+	if(pos == (entry->nFiles - 1)){
+		strcpy(entry->files[pos].fname, "\0");
+		strcpy(entry->files[pos].fext, "\0");
+		entry->nFiles -= 1;
+	}
+	else{
+		entry->files[pos] = entry->files[entry->nFiles-1];
+		strcpy(entry->files[entry->nFiles-1].fname, "\0");
+		strcpy(entry->files[pos].fext, "\0");
+		entry->nFiles -=1;
 	}
 }
 
