@@ -637,6 +637,8 @@ static struct fuse_operations csc452_oper = {
     .rmdir		= csc452_rmdir
 };
 
+// This function opens the disk and reads in the root to the root
+// structure
 void open_root(csc452_root_directory *root){
 	FILE *file = fopen(".disk", "r+b");
 	if(file != NULL){
@@ -648,23 +650,15 @@ void open_root(csc452_root_directory *root){
 	}
 }
 
-void open_fat(short *fat_table){
-	FILE *file = fopen(".disk", "r+b");
-
-	if(file != NULL){
-		fseek(file, -sizeof(fat_table), SEEK_END);
-		if(fread(fat_table, sizeof(fat_table), 1, file) == (size_t)0){
-			printf("File could not be read\n");
-			return;
-		}
-		fclose(file);
-	}
-}
-
+// This function takes in a directory name and will search the disk
+// for the directory, fill the entry parameter and return the start 
+// block of the directory
 long get_directory(csc452_directory_entry *directory, char *directoryName){
 	long startBlock = 0;
 	csc452_root_directory root;
 	open_root(&root);
+    
+    // Iterate and find that directory in the root
 	for(int i = 0; i < root.nDirectories; i++){
 		if(strcmp(directoryName, root.directories[i].dname) == 0){
 			startBlock = root.directories[i].nStartBlock;
@@ -673,6 +667,8 @@ long get_directory(csc452_directory_entry *directory, char *directoryName){
 	}
 
 	FILE *file = fopen(".disk", "r");
+    
+    // Get the directory from the disk
 	if(file != NULL){
 		fseek(file, startBlock, SEEK_SET);
 		fread(directory, sizeof(csc452_directory_entry), 1, file);
@@ -681,12 +677,13 @@ long get_directory(csc452_directory_entry *directory, char *directoryName){
 	return startBlock;
 }
 
-// Will always check_file before calling get_file
-// Returns the Start Block of that file
+// This function will always check_file before calling get_file 
+// returning the Start Block of that file
 int get_file(char *directory, char * file, char *extension) {
     csc452_directory_entry entry;
     get_directory(&entry, directory);
 
+    // Iterate and find the start block of the file
     for(int i = 0; i < entry.nFiles; i++) {
         if(strcmp(entry.files[i].fname, file) == 0 && 
             strcmp(entry.files[i].fext, extension) == 0) {
@@ -696,10 +693,13 @@ int get_file(char *directory, char * file, char *extension) {
     return -1;
 }
 
+// This function will always check_file before calling get_file 
+// returning the Start Block of that file
 int check_directory(char *directory){
 	int flag = 0;
 	csc452_root_directory root;
 	open_root(&root);
+
 	for(int i = 0; i < root.nDirectories; i++){
 		if(strcmp(directory, root.directories[i].dname) == 0){
 			flag = 1;
@@ -710,16 +710,15 @@ int check_directory(char *directory){
 	return flag;
 }
 
+// This function checks if a file exists in a directory
+// returning the file if it is true
 int check_file(char *directory, char * file, char *extension){
 	int flag = -1;
 
-	if(check_directory(directory) == 0){
-		return flag;
-	} 
-	else {
+	if(check_directory(directory) != 0) {
 		csc452_directory_entry entry;
 		get_directory(&entry, directory);
-		for(int i = 0; i < entry.nFiles; i++){
+		for(int i = 0; i < entry.nFiles; i++) {
 			if(strcmp(entry.files[i].fname, file) == 0 && strcmp(extension, entry.files[i].fext) == 0){
 				flag = entry.files[i].fsize;
 				break;
@@ -729,6 +728,7 @@ int check_file(char *directory, char * file, char *extension){
 	return flag;
 }
 
+// This function removes a directory from the root
 void remove_directory(int pos, csc452_root_directory *root){
 	if(pos == (root->nDirectories - 1)){
 		strcpy(root->directories[pos].dname, "\0");
@@ -741,6 +741,8 @@ void remove_directory(int pos, csc452_root_directory *root){
 	}
 }
 
+// This function writes a new file size to a specified file
+// given its directory
 void update_file_size(size_t newSize, char * directory, char * file, char * extension){
 	csc452_directory_entry entry;
 	long startBlock = get_directory(&entry, directory);
@@ -757,6 +759,8 @@ void update_file_size(size_t newSize, char * directory, char * file, char * exte
 	}
 }
 
+// This function splits the path into 3 different variables, directory
+// file and extension
 int split_path(const char *path, char *directory, char *file, char *extension){
 	int readIn = sscanf(path, "/%[^/]/%[^.].%s", directory, file, extension);
 	directory[MAX_FILENAME] = '\0';
@@ -773,11 +777,13 @@ int split_path(const char *path, char *directory, char *file, char *extension){
 	return file_type;
 }
 
+// This function opens the disk and get the next available fat block
 long get_fat_block(){
 	FILE *disk = fopen(".disk", "r+b");
 	short fat_val;
 	fseek(disk, ((-FAT_BLOCK_SIZE) + sizeof(short)), SEEK_END);
 	fread(&fat_val, sizeof(short), 1, disk);
+    // Find next available fat block
 	for(int i = 1; i < FAT_ENTRIES; i++){
 		if(fat_val == 0){
 			return i * 512;
@@ -788,6 +794,8 @@ long get_fat_block(){
 	return -1;
 }
 
+// This function takes in a value and block address. It sets
+// that address' value to value
 void set_fat_block(long blockAddr, short val){
 	FILE *disk = fopen(".disk", "r+b");
 	short fat_entry = blockAddr / BLOCK_SIZE;
@@ -796,6 +804,7 @@ void set_fat_block(long blockAddr, short val){
 	fclose(disk);
 }
 
+// This function returns the value at a specified block address
 short get_fat_val(long blockAddr){
 	FILE *disk = fopen(".disk", "r+b");
 	short fat_entry = blockAddr / BLOCK_SIZE;
