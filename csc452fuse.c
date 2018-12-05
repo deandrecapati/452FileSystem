@@ -109,21 +109,24 @@ void update_file_size(size_t newSize, char * directory, char * file, char * exte
 static int csc452_getattr(const char *path, struct stat *stbuf)
 {
 	int res = 0;
-
+    // Parse path
 	char directory[MAX_FILENAME + 1] = "";
 	char file[MAX_FILENAME + 1] = "";
 	char extension[MAX_EXTENSION + 1] = "";
     int fsize = -1;
 
 	int file_type = split_path(path, directory, file, extension);
-	if (strcmp(path, "/") == 0) {
+	// Path is root
+    if (strcmp(path, "/") == 0) {
 		stbuf->st_mode = S_IFDIR | 0755;
 		stbuf->st_nlink = 2;
-	} 
+	}
+    // Path is directory 
 	else if(file_type == 0 && check_directory(directory) == 1) {
 		stbuf->st_mode = S_IFDIR | 0755;
 		stbuf->st_nlink = 2;
 	}
+    // Path is file
 	else if(file_type >= 1 && (fsize = check_file(directory, file, extension)) != -1) {
 		stbuf->st_mode = S_IFREG | 0666;
 		stbuf->st_nlink = 2;
@@ -150,34 +153,43 @@ static int csc452_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	(void) offset;
 	(void) fi;
 
+    // Parse path
     char directory[MAX_FILENAME + 1];
 	char file[MAX_FILENAME + 1];
 	char extension[MAX_EXTENSION + 1];
     int fileOrDir = split_path(path, directory, file, extension);
 
+    // Path is root
     if(strcmp(path, "/") == 0) {
 		filler(buf, ".", NULL,0);
 		filler(buf, "..", NULL, 0);
         
 		csc452_root_directory root;
 		open_root(&root);
+       
+        // Add all directories in the root
         for(int i = 0; i < root.nDirectories; i++) {
             if(strcmp(root.directories[i].dname, "\0") != 0) {
                 filler(buf, root.directories[i].dname, NULL, 0);
             }
         }
     }
+    // Path is directory 
     else if(fileOrDir == 0 && check_directory(directory) == 1) {
 		filler(buf, ".", NULL,0);
 		filler(buf, "..", NULL, 0);
 
         csc452_directory_entry entry;
         get_directory(&entry, directory);
+    
+        // Add all the files in the directory
         for(int i = 0; i < entry.nFiles; i++) {
             if(strcmp(entry.files[i].fname, "\0") != 0) {
+                // No extention
                 if(strcmp(entry.files[i].fext, "\0") == 0) { 
                     filler(buf, entry.files[i].fname, NULL, 0);
                 }
+                // With extention
                 else {
                     char fullFileName[MAX_FILENAME + MAX_EXTENSION + 2];
                     strcpy(fullFileName, entry.files[i].fname);
@@ -202,26 +214,29 @@ static int csc452_mkdir(const char *path, mode_t mode)
 {
 	(void) path;
 	(void) mode;
+
+    // Parse path
 	char directory[MAX_FILENAME + 1] = "";
 	char file[MAX_FILENAME + 1] = "";
 	char extension[MAX_EXTENSION + 1] = "";
 	int res = 0;
 	int type = split_path(path, directory, file, extension);
 
-	if(strlen(directory) > MAX_FILENAME){
+    // Error checks
+	if(strlen(directory) > MAX_FILENAME) {
 		return -ENAMETOOLONG;
 	}
-	else if(type != 0){
+	else if(type != 0) {
 		return -EPERM;
 	}
-	else if(check_directory(directory) != 0){
+	else if(check_directory(directory) != 0) {
 		return -EEXIST;
 	}
 
 	csc452_root_directory root;
 	open_root(&root);
 
-	if(root.nDirectories >= MAX_DIRS_IN_ROOT){
+	if(root.nDirectories >= MAX_DIRS_IN_ROOT) {
 		printf("The directory could not be created, you have reached the maximum directories allowed in the root.\n");
 		return -1;
 	}
@@ -229,16 +244,16 @@ static int csc452_mkdir(const char *path, mode_t mode)
 	root.nDirectories += 1;
 	long blockPos = get_fat_block();
 
-	//Update FAT table to mark the directory
+	// Update FAT table to mark the directory
 	set_fat_block(blockPos, -1);
-	//Create directory entry
+	// Create directory entry
 	csc452_directory_entry newDir;
 	newDir.nFiles = 0;
 	FILE *disk = fopen(".disk", "r+b");
 	strcpy(root.directories[root.nDirectories-1].dname, directory);
 	root.directories[root.nDirectories-1].nStartBlock = blockPos;
 
-	//Update disk
+	// Update disk
 	fseek(disk, 0, SEEK_SET);
 	fwrite(&root, BLOCK_SIZE, 1, disk);
 	fseek(disk, blockPos, SEEK_SET);
@@ -266,19 +281,18 @@ static int csc452_mknod(const char *path, mode_t mode, dev_t dev)
 	char file[MAX_FILENAME + 1] = "";
 	char extension[MAX_EXTENSION + 1] = "";
 	int res = 0;
-
 	split_path(path, directory, file, extension);
 
-	if(strcmp(path, "/") == 0){
+	if(strcmp(path, "/") == 0) {
 		res = -EPERM;
 	}
-	else if(strlen(file) > MAX_FILENAME){
+	else if(strlen(file) > MAX_FILENAME) {
 		res = -ENAMETOOLONG;
 	}
-	else if(check_file(directory, file, extension) >= 0){
+	else if(check_file(directory, file, extension) >= 0) {
 		res = -EEXIST;
 	}
-	else{
+	else {
 		csc452_directory_entry entry;
 		long directoryStart = get_directory(&entry, directory);
 		long blockPos = get_fat_block();
@@ -289,12 +303,13 @@ static int csc452_mknod(const char *path, mode_t mode, dev_t dev)
 		//Create directory entry
 		entry.files[entry.nFiles-1].nStartBlock = blockPos;
 		strcpy(entry.files[entry.nFiles-1].fname, file);
-		if(strcmp(extension, "\0") == 0){
+		if(strcmp(extension, "\0") == 0) {
 			strcpy(entry.files[entry.nFiles-1].fext, "\0");
 		}
-		else{
+		else {
 			strcpy(entry.files[entry.nFiles-1].fext, extension);
 		}		
+
 		entry.files[entry.nFiles-1].fsize = 0;
 
 		//Update disk
@@ -319,18 +334,16 @@ static int csc452_read(const char *path, char *buf, size_t size, off_t offset,
 	(void) fi;
 	(void) path;
 
+    // Parse path
 	char directory[MAX_FILENAME + 1] = "";
 	char file[MAX_FILENAME + 1] = "";
 	char extension[MAX_EXTENSION + 1] = "";
 	int res = 0;
 
 	split_path(path, directory, file, extension);
-
-	if(check_file(directory, file, extension) <= 0){
+	if(check_file(directory, file, extension) <= 0) {
 		return -ENOENT;
 	}
-
-
 
 	//check to make sure path exists
 	//check that size is > 0
@@ -351,22 +364,27 @@ static int csc452_write(const char *path, const char *buf, size_t size,
 	(void) offset;
 	(void) fi;
 	(void) path;
+
+    // Parse path
     char directory[MAX_FILENAME + 1];
 	char file[MAX_FILENAME + 1];
 	char extension[MAX_EXTENSION + 1];
     int fileOrDir = split_path(path, directory, file, extension);
 	size_t res = size;
 	size_t fileSize = 0;
-
+    
+    // Error check
     if(offset > (fileSize = check_file(directory, file, extension))) {
         return -EFBIG;    
     }
+    // Check if the file exists
     else if(check_directory(directory) == 1) {
         long fileStart = get_file(directory, file, extension);
         long fileStartIndex = fileStart / BLOCK_SIZE;
         int offsetIndex = offset / BLOCK_SIZE;
         int beginWriting = offset % BLOCK_SIZE;
-
+        
+        // Update the file size 
 		update_file_size((fileSize + res), directory, file, extension);
  
 	    FILE *disk = fopen(".disk", "r+b");
@@ -401,16 +419,17 @@ static int csc452_write(const char *path, const char *buf, size_t size,
             size = size - (BLOCK_SIZE - beginWriting);
             
             // As long as there are available blocks to use
-
             while(get_fat_val(fileStartIndex * BLOCK_SIZE) != -1) {
                 fileStartIndex = get_fat_val(fileStartIndex * BLOCK_SIZE);
                 fseek(disk, fileStartIndex * BLOCK_SIZE, SEEK_SET);
+                // Need to write a block amount of data
                 if(size > BLOCK_SIZE) {
                     strncpy(block.data, buf, BLOCK_SIZE);
                     fwrite(&block, sizeof(csc452_disk_block), 1, disk);
                     buf += BLOCK_SIZE;
                     size = size - BLOCK_SIZE;
                 }
+                // Need to write less than a block of data
                 else {
                     strncpy(block.data, buf, size);
                     fwrite(&block, sizeof(csc452_disk_block), 1, disk);
@@ -420,6 +439,7 @@ static int csc452_write(const char *path, const char *buf, size_t size,
             // More to write and need more blocks
 			long prevBlock = 0;
             while(size > 0) {
+                // Need to write a block amount of data
                 if(size > BLOCK_SIZE) {
                     strncpy(block.data, buf, BLOCK_SIZE);
                     long nextBlock = get_fat_block();
@@ -433,6 +453,7 @@ static int csc452_write(const char *path, const char *buf, size_t size,
                     buf += BLOCK_SIZE;
                     size = size - BLOCK_SIZE;
                 }
+                // Need to write less than a block of data
                 else {
                     strncpy(block.data, buf, size);
                     long nextBlock = get_fat_block();
@@ -459,19 +480,20 @@ static int csc452_write(const char *path, const char *buf, size_t size,
  */
 static int csc452_rmdir(const char *path)
 {
-	int res = 0;
+    // Parse path
 	char directory[MAX_FILENAME + 1] = "";
 	char file[MAX_FILENAME + 1] = "";
 	char extension[MAX_EXTENSION + 1] = "";
+	int res = 0;
 
 	int file_type = split_path(path, directory, file, extension);
 
-	if(strcmp(file, "\0") != 0){
+    // Error checks
+	if(strcmp(file, "\0") != 0) { 
 		res = -ENOTDIR;
 		return res;
 	}
-
-	if(check_directory(directory) != 1){
+	else if(check_directory(directory) != 1) {
 		res = -ENOENT;
 		return res;
 	}
@@ -479,9 +501,10 @@ static int csc452_rmdir(const char *path)
 	csc452_directory_entry entry;
 	get_directory(&entry, directory);
 
-	if(entry.nFiles > 0){
+	if(entry.nFiles > 0) {
 		res = -ENOTEMPTY;
-	} else{
+	} 
+    else {
 		csc452_root_directory root;
 		open_root(&root);
 		for(int i = 0; i < root.nDirectories; i++){
